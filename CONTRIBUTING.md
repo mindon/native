@@ -116,4 +116,4 @@ Thank you for your contribution! Please follow these steps to ensure a smooth re
 3. Push your branch to your forked repository.
 4. Open a pull request against the main repository's `main` branch.
 
-Please ensure to sign your commits. If you don't know what that means, you can read about it in the [Git documentation](https://git-scm.com/book/en/v2/Git-Tools-Signing-Your-Work).
+Please cryptographically sign your commits so they show as **Verified** on GitHub. This requires a GPG or SSH signing key added to your GitHub account — see [GitHub's guide](https://docs.github.com/en/authentication/managing-commit-signature-verification/about-commit-signature-verification). Note: the `Signed-off-by` trailer (`git commit -s`) is a DCO attestation and does **not** produce the Verified badge; you need `git commit -S` (uppercase) or `commit.gpgsign = true` in your git config.
