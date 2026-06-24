@@ -1,6 +1,8 @@
 const std = @import("std");
 const build_options = @import("build_options");
 const zero_native = @import("zero-native");
+const app_manifest = @import("app_manifest_zon");
+const manifest_shortcuts = if (@hasField(@TypeOf(app_manifest), "shortcuts")) app_manifest.shortcuts else .{};
 
 pub const StdoutTraceSink = struct {
     pub fn sink(self: *StdoutTraceSink) zero_native.trace.Sink {
@@ -25,6 +27,7 @@ pub const RunOptions = struct {
     bridge: ?zero_native.BridgeDispatcher = null,
     builtin_bridge: zero_native.BridgePolicy = .{},
     security: zero_native.SecurityPolicy = .{},
+    shortcuts: ?[]const zero_native.Shortcut = null,
 
     fn appInfo(self: RunOptions) zero_native.AppInfo {
         return .{
@@ -34,7 +37,54 @@ pub const RunOptions = struct {
             .icon_path = self.icon_path,
         };
     }
+
+    fn resolvedShortcuts(self: RunOptions, storage: *ShortcutStorage) []const zero_native.Shortcut {
+        return self.shortcuts orelse storage.fromManifest();
+    }
 };
+
+const ShortcutStorage = struct {
+    shortcuts: [zero_native.platform.max_shortcuts]zero_native.Shortcut = undefined,
+
+    fn fromManifest(self: *ShortcutStorage) []const zero_native.Shortcut {
+        comptime {
+            if (manifest_shortcuts.len > zero_native.platform.max_shortcuts) {
+                @compileError("app.zon defines too many shortcuts");
+            }
+        }
+
+        inline for (manifest_shortcuts, 0..) |shortcut, index| {
+            self.shortcuts[index] = .{
+                .id = shortcut.id,
+                .key = shortcut.key,
+                .modifiers = shortcutModifiers(shortcut),
+            };
+        }
+        return self.shortcuts[0..manifest_shortcuts.len];
+    }
+};
+
+fn shortcutModifiers(comptime shortcut: anytype) zero_native.ShortcutModifiers {
+    const values = if (@hasField(@TypeOf(shortcut), "modifiers")) shortcut.modifiers else .{};
+    var modifiers: zero_native.ShortcutModifiers = .{};
+    inline for (values) |value| {
+        const modifier: []const u8 = value;
+        if (comptime std.mem.eql(u8, modifier, "primary")) {
+            modifiers.primary = true;
+        } else if (comptime std.mem.eql(u8, modifier, "command")) {
+            modifiers.command = true;
+        } else if (comptime std.mem.eql(u8, modifier, "control")) {
+            modifiers.control = true;
+        } else if (comptime std.mem.eql(u8, modifier, "option") or std.mem.eql(u8, modifier, "alt")) {
+            modifiers.option = true;
+        } else if (comptime std.mem.eql(u8, modifier, "shift")) {
+            modifiers.shift = true;
+        } else {
+            @compileError("unknown app.zon shortcut modifier");
+        }
+    }
+    return modifiers;
+}
 
 pub fn runWithOptions(app: zero_native.App, options: RunOptions, init: std.process.Init) !void {
     if (build_options.debug_overlay) {
@@ -70,6 +120,8 @@ fn runNull(app: zero_native.App, options: RunOptions, init: std.process.Init) !v
         fanout_sink = .{ .sinks = &fanout_sinks };
         runtime_trace_sink = fanout_sink.sink();
     }
+    var shortcut_storage: ShortcutStorage = .{};
+    const shortcuts = options.resolvedShortcuts(&shortcut_storage);
     var runtime = zero_native.Runtime.init(.{
         .platform = null_platform.platform(),
         .trace_sink = runtime_trace_sink,
@@ -77,6 +129,7 @@ fn runNull(app: zero_native.App, options: RunOptions, init: std.process.Init) !v
         .bridge = options.bridge,
         .builtin_bridge = options.builtin_bridge,
         .security = options.security,
+        .shortcuts = shortcuts,
         .automation = if (build_options.automation) zero_native.automation.Server.init(init.io, ".zig-cache/zero-native-automation", app_info.resolvedWindowTitle()) else null,
         .window_state_store = store,
     });
@@ -104,6 +157,8 @@ fn runMacos(app: zero_native.App, options: RunOptions, init: std.process.Init) !
         fanout_sink = .{ .sinks = &fanout_sinks };
         runtime_trace_sink = fanout_sink.sink();
     }
+    var shortcut_storage: ShortcutStorage = .{};
+    const shortcuts = options.resolvedShortcuts(&shortcut_storage);
     var runtime = zero_native.Runtime.init(.{
         .platform = mac_platform.platform(),
         .trace_sink = runtime_trace_sink,
@@ -111,6 +166,7 @@ fn runMacos(app: zero_native.App, options: RunOptions, init: std.process.Init) !
         .bridge = options.bridge,
         .builtin_bridge = options.builtin_bridge,
         .security = options.security,
+        .shortcuts = shortcuts,
         .automation = if (build_options.automation) zero_native.automation.Server.init(init.io, ".zig-cache/zero-native-automation", app_info.resolvedWindowTitle()) else null,
         .window_state_store = store,
     });
@@ -138,6 +194,8 @@ fn runLinux(app: zero_native.App, options: RunOptions, init: std.process.Init) !
         fanout_sink = .{ .sinks = &fanout_sinks };
         runtime_trace_sink = fanout_sink.sink();
     }
+    var shortcut_storage: ShortcutStorage = .{};
+    const shortcuts = options.resolvedShortcuts(&shortcut_storage);
     var runtime = zero_native.Runtime.init(.{
         .platform = linux_platform.platform(),
         .trace_sink = runtime_trace_sink,
@@ -145,6 +203,7 @@ fn runLinux(app: zero_native.App, options: RunOptions, init: std.process.Init) !
         .bridge = options.bridge,
         .builtin_bridge = options.builtin_bridge,
         .security = options.security,
+        .shortcuts = shortcuts,
         .automation = if (build_options.automation) zero_native.automation.Server.init(init.io, ".zig-cache/zero-native-automation", app_info.resolvedWindowTitle()) else null,
         .window_state_store = store,
     });
@@ -172,6 +231,8 @@ fn runWindows(app: zero_native.App, options: RunOptions, init: std.process.Init)
         fanout_sink = .{ .sinks = &fanout_sinks };
         runtime_trace_sink = fanout_sink.sink();
     }
+    var shortcut_storage: ShortcutStorage = .{};
+    const shortcuts = options.resolvedShortcuts(&shortcut_storage);
     var runtime = zero_native.Runtime.init(.{
         .platform = windows_platform.platform(),
         .trace_sink = runtime_trace_sink,
@@ -179,6 +240,7 @@ fn runWindows(app: zero_native.App, options: RunOptions, init: std.process.Init)
         .bridge = options.bridge,
         .builtin_bridge = options.builtin_bridge,
         .security = options.security,
+        .shortcuts = shortcuts,
         .automation = if (build_options.automation) zero_native.automation.Server.init(init.io, ".zig-cache/zero-native-automation", app_info.resolvedWindowTitle()) else null,
         .window_state_store = store,
     });

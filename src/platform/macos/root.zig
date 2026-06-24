@@ -18,6 +18,7 @@ const AppKitEventKind = enum(c_int) {
     shutdown = 2,
     resize = 3,
     window_frame = 4,
+    shortcut = 5,
 };
 
 const AppKitEvent = extern struct {
@@ -32,10 +33,21 @@ const AppKitEvent = extern struct {
     focused: c_int,
     label: [*]const u8,
     label_len: usize,
+    shortcut_id: [*]const u8,
+    shortcut_id_len: usize,
+    shortcut_key: [*]const u8,
+    shortcut_key_len: usize,
+    shortcut_modifiers: u32,
 };
 
 const AppKitCallback = *const fn (context: ?*anyopaque, event: *const AppKitEvent) callconv(.c) void;
 const AppKitBridgeCallback = *const fn (context: ?*anyopaque, window_id: u64, webview_label: [*]const u8, webview_label_len: usize, message: [*]const u8, message_len: usize, origin: [*]const u8, origin_len: usize) callconv(.c) void;
+
+const shortcut_modifier_primary: u32 = 1 << 0;
+const shortcut_modifier_command: u32 = 1 << 1;
+const shortcut_modifier_control: u32 = 1 << 2;
+const shortcut_modifier_option: u32 = 1 << 3;
+const shortcut_modifier_shift: u32 = 1 << 4;
 
 extern fn zero_native_appkit_create(app_name: [*]const u8, app_name_len: usize, window_title: [*]const u8, window_title_len: usize, bundle_id: [*]const u8, bundle_id_len: usize, icon_path: [*]const u8, icon_path_len: usize, window_label: [*]const u8, window_label_len: usize, x: f64, y: f64, width: f64, height: f64, restore_frame: c_int) ?*AppKitHost;
 extern fn zero_native_appkit_destroy(host: *AppKitHost) void;
@@ -49,6 +61,7 @@ extern fn zero_native_appkit_bridge_respond_window(host: *AppKitHost, window_id:
 extern fn zero_native_appkit_bridge_respond_webview(host: *AppKitHost, window_id: u64, webview_label: [*]const u8, webview_label_len: usize, response: [*]const u8, response_len: usize) void;
 extern fn zero_native_appkit_emit_window_event(host: *AppKitHost, window_id: u64, name: [*]const u8, name_len: usize, detail_json: [*]const u8, detail_json_len: usize) void;
 extern fn zero_native_appkit_set_security_policy(host: *AppKitHost, allowed_origins: [*]const u8, allowed_origins_len: usize, external_urls: [*]const u8, external_urls_len: usize, external_action: c_int) void;
+extern fn zero_native_appkit_set_shortcuts(host: *AppKitHost, ids: [*]const [*]const u8, id_lens: [*]const usize, keys: [*]const [*]const u8, key_lens: [*]const usize, modifiers: [*]const u32, count: usize) void;
 extern fn zero_native_appkit_create_window(host: *AppKitHost, window_id: u64, window_title: [*]const u8, window_title_len: usize, window_label: [*]const u8, window_label_len: usize, x: f64, y: f64, width: f64, height: f64, restore_frame: c_int) c_int;
 extern fn zero_native_appkit_focus_window(host: *AppKitHost, window_id: u64) c_int;
 extern fn zero_native_appkit_close_window(host: *AppKitHost, window_id: u64) c_int;
@@ -181,6 +194,7 @@ pub const MacPlatform = struct {
                 .update_tray_menu_fn = updateTrayMenu,
                 .remove_tray_fn = removeTray,
                 .configure_security_policy_fn = configureSecurityPolicy,
+                .configure_shortcuts_fn = configureShortcuts,
                 .emit_window_event_fn = emitWindowEvent,
             },
             .app_info = self.app_info,
@@ -257,6 +271,12 @@ fn appkitCallback(context: ?*anyopaque, event: *const AppKitEvent) callconv(.c) 
                 .focused = event.focused != 0,
             } });
         },
+        .shortcut => state.emit(.{ .shortcut = .{
+            .id = event.shortcut_id[0..event.shortcut_id_len],
+            .key = event.shortcut_key[0..event.shortcut_key_len],
+            .modifiers = shortcutModifiersFromFlags(event.shortcut_modifiers),
+            .window_id = event.window_id,
+        } }),
     }
 }
 
@@ -398,6 +418,46 @@ fn configureSecurityPolicy(context: ?*anyopaque, policy: security.Policy) anyerr
         external_urls.len,
         @intFromEnum(policy.navigation.external_links.action),
     );
+}
+
+fn configureShortcuts(context: ?*anyopaque, shortcuts: []const platform_mod.Shortcut) anyerror!void {
+    const self: *MacPlatform = @ptrCast(@alignCast(context.?));
+    if (shortcuts.len > platform_mod.max_shortcuts) return error.InvalidShortcut;
+    var ids: [platform_mod.max_shortcuts][*]const u8 = undefined;
+    var id_lens: [platform_mod.max_shortcuts]usize = undefined;
+    var keys: [platform_mod.max_shortcuts][*]const u8 = undefined;
+    var key_lens: [platform_mod.max_shortcuts]usize = undefined;
+    var modifiers: [platform_mod.max_shortcuts]u32 = undefined;
+    for (shortcuts, 0..) |shortcut, index| {
+        if (shortcut.id.len == 0 or shortcut.id.len > platform_mod.max_shortcut_id_bytes) return error.InvalidShortcut;
+        if (shortcut.key.len == 0 or shortcut.key.len > platform_mod.max_shortcut_key_bytes) return error.InvalidShortcut;
+        ids[index] = shortcut.id.ptr;
+        id_lens[index] = shortcut.id.len;
+        keys[index] = shortcut.key.ptr;
+        key_lens[index] = shortcut.key.len;
+        modifiers[index] = shortcutModifierFlags(shortcut.modifiers);
+    }
+    zero_native_appkit_set_shortcuts(self.host, ids[0..shortcuts.len].ptr, id_lens[0..shortcuts.len].ptr, keys[0..shortcuts.len].ptr, key_lens[0..shortcuts.len].ptr, modifiers[0..shortcuts.len].ptr, shortcuts.len);
+}
+
+fn shortcutModifierFlags(modifiers: platform_mod.ShortcutModifiers) u32 {
+    var flags: u32 = 0;
+    if (modifiers.primary) flags |= shortcut_modifier_primary;
+    if (modifiers.command) flags |= shortcut_modifier_command;
+    if (modifiers.control) flags |= shortcut_modifier_control;
+    if (modifiers.option) flags |= shortcut_modifier_option;
+    if (modifiers.shift) flags |= shortcut_modifier_shift;
+    return flags;
+}
+
+fn shortcutModifiersFromFlags(flags: u32) platform_mod.ShortcutModifiers {
+    return .{
+        .primary = (flags & shortcut_modifier_primary) != 0,
+        .command = (flags & shortcut_modifier_command) != 0,
+        .control = (flags & shortcut_modifier_control) != 0,
+        .option = (flags & shortcut_modifier_option) != 0,
+        .shift = (flags & shortcut_modifier_shift) != 0,
+    };
 }
 
 fn showOpenDialog(context: ?*anyopaque, options: platform_mod.OpenDialogOptions, buffer: []u8) anyerror!platform_mod.OpenDialogResult {

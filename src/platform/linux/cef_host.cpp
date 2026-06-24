@@ -236,6 +236,16 @@ void zero_native_gtk_set_security_policy(Host *host, const char *allowed_origins
     (void)external_action;
 }
 
+void zero_native_gtk_set_shortcuts(Host *host, const char *const *ids, const size_t *id_lens, const char *const *keys, const size_t *key_lens, const uint32_t *modifiers, size_t count) {
+    (void)host;
+    (void)ids;
+    (void)id_lens;
+    (void)keys;
+    (void)key_lens;
+    (void)modifiers;
+    (void)count;
+}
+
 int zero_native_gtk_create_window(Host *host, uint64_t window_id, const char *window_title, size_t window_title_len, const char *window_label, size_t window_label_len, double x, double y, double width, double height, int restore_frame) {
     (void)restore_frame;
     if (!host || host->windows.find(window_id) != host->windows.end()) return 0;

@@ -24,6 +24,7 @@ export const navSections: NavSection[] = [
       { name: "Web Engines", href: "/web-engines" },
       { name: "Windows", href: "/windows" },
       { name: "Multiple WebViews", href: "/webviews" },
+      { name: "Keyboard Shortcuts", href: "/keyboard-shortcuts" },
       { name: "Bridge", href: "/bridge" },
       { name: "Builtin Commands", href: "/bridge/builtin-commands" },
       { name: "Dialogs", href: "/dialogs" },

@@ -83,6 +83,7 @@ pub fn build(b: *std.Build) void {
     const runner_mod = localModule(b, target, optimize, "src/runner.zig");
     runner_mod.addImport("zero-native", zero_native_mod);
     runner_mod.addImport("build_options", options_mod);
+    runner_mod.addImport("app_manifest_zon", b.createModule(.{ .root_source_file = b.path("app.zon") }));
 
     const app_mod = localModule(b, target, optimize, "src/main.zig");
     app_mod.addImport("zero-native", zero_native_mod);

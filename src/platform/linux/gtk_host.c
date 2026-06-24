@@ -8,6 +8,19 @@
 
 #define ZERO_NATIVE_MAX_WINDOWS 16
 #define ZERO_NATIVE_MAX_WEBVIEWS 16
+#define ZERO_NATIVE_MAX_SHORTCUTS 64
+
+#define ZERO_NATIVE_SHORTCUT_MODIFIER_PRIMARY (1u << 0)
+#define ZERO_NATIVE_SHORTCUT_MODIFIER_COMMAND (1u << 1)
+#define ZERO_NATIVE_SHORTCUT_MODIFIER_CONTROL (1u << 2)
+#define ZERO_NATIVE_SHORTCUT_MODIFIER_OPTION  (1u << 3)
+#define ZERO_NATIVE_SHORTCUT_MODIFIER_SHIFT   (1u << 4)
+
+typedef struct zero_native_gtk_shortcut {
+    char *id;
+    char *key;
+    uint32_t modifiers;
+} zero_native_gtk_shortcut_t;
 
 typedef struct zero_native_gtk_webview {
     char *label;
@@ -68,6 +81,8 @@ struct zero_native_gtk_host {
     int allowed_external_urls_count;
     int external_link_action;
     int scheme_registered;
+    zero_native_gtk_shortcut_t shortcuts[ZERO_NATIVE_MAX_SHORTCUTS];
+    int shortcut_count;
 };
 
 static char *zero_native_strndup(const char *s, size_t len) {
@@ -117,6 +132,16 @@ static char **zero_native_parse_newline_list(const char *bytes, size_t len, int 
 static void zero_native_replace_string(char **dest, const char *bytes, size_t len) {
     free(*dest);
     *dest = bytes && len > 0 ? zero_native_strndup(bytes, len) : NULL;
+}
+
+static void zero_native_clear_shortcuts(zero_native_gtk_host_t *host) {
+    if (!host) return;
+    for (int i = 0; i < host->shortcut_count; i++) {
+        free(host->shortcuts[i].id);
+        free(host->shortcuts[i].key);
+        memset(&host->shortcuts[i], 0, sizeof(host->shortcuts[i]));
+    }
+    host->shortcut_count = 0;
 }
 
 static void zero_native_clear_window_source(zero_native_gtk_window_t *win) {
@@ -479,6 +504,81 @@ static void zero_native_emit_resize(zero_native_gtk_host_t *host, zero_native_gt
     });
 }
 
+static const char *zero_native_shortcut_key_for_keyval(guint keyval, char *buffer, size_t buffer_len) {
+    if (!buffer || buffer_len < 2) return "";
+    guint lower = gdk_keyval_to_lower(keyval);
+    if ((lower >= 'a' && lower <= 'z') || (lower >= '0' && lower <= '9') ||
+        lower == '=' || lower == '+' || lower == '-' || lower == ',' ||
+        lower == '.' || lower == '/' || lower == ';' || lower == '\'' ||
+        lower == '[' || lower == ']' || lower == '\\' || lower == '`') {
+        buffer[0] = (char)lower;
+        buffer[1] = '\0';
+        return buffer;
+    }
+    switch (keyval) {
+        case GDK_KEY_Escape: return "escape";
+        case GDK_KEY_Return:
+        case GDK_KEY_KP_Enter: return "enter";
+        case GDK_KEY_Tab: return "tab";
+        case GDK_KEY_space: return "space";
+        case GDK_KEY_BackSpace: return "backspace";
+        case GDK_KEY_Left: return "arrowleft";
+        case GDK_KEY_Right: return "arrowright";
+        case GDK_KEY_Up: return "arrowup";
+        case GDK_KEY_Down: return "arrowdown";
+        default: return "";
+    }
+}
+
+static int zero_native_shortcut_modifiers_match(uint32_t shortcut_modifiers, GdkModifierType event_modifiers) {
+    int needs_control = (shortcut_modifiers & ZERO_NATIVE_SHORTCUT_MODIFIER_CONTROL) != 0 ||
+        (shortcut_modifiers & ZERO_NATIVE_SHORTCUT_MODIFIER_PRIMARY) != 0;
+    int needs_option = (shortcut_modifiers & ZERO_NATIVE_SHORTCUT_MODIFIER_OPTION) != 0;
+    int needs_shift = (shortcut_modifiers & ZERO_NATIVE_SHORTCUT_MODIFIER_SHIFT) != 0;
+    int needs_command = (shortcut_modifiers & ZERO_NATIVE_SHORTCUT_MODIFIER_COMMAND) != 0;
+    int has_control = (event_modifiers & GDK_CONTROL_MASK) != 0;
+    int has_option = (event_modifiers & GDK_ALT_MASK) != 0;
+    int has_shift = (event_modifiers & GDK_SHIFT_MASK) != 0;
+    int has_command = 0;
+#ifdef GDK_META_MASK
+    has_command = has_command || ((event_modifiers & GDK_META_MASK) != 0);
+#endif
+#ifdef GDK_SUPER_MASK
+    has_command = has_command || ((event_modifiers & GDK_SUPER_MASK) != 0);
+#endif
+    return has_control == needs_control &&
+        has_option == needs_option &&
+        has_shift == needs_shift &&
+        has_command == needs_command;
+}
+
+static gboolean on_shortcut_key_pressed(GtkEventControllerKey *controller, guint keyval, guint keycode, GdkModifierType state, gpointer data) {
+    (void)controller;
+    (void)keycode;
+    zero_native_gtk_window_t *win = data;
+    zero_native_gtk_host_t *host = win ? win->host : NULL;
+    if (!host || host->shortcut_count == 0) return FALSE;
+    char key_buffer[32];
+    const char *key = zero_native_shortcut_key_for_keyval(keyval, key_buffer, sizeof(key_buffer));
+    if (!key || !key[0]) return FALSE;
+    for (int i = 0; i < host->shortcut_count; i++) {
+        zero_native_gtk_shortcut_t *shortcut = &host->shortcuts[i];
+        if (!shortcut->id || !shortcut->key || strcmp(shortcut->key, key) != 0) continue;
+        if (!zero_native_shortcut_modifiers_match(shortcut->modifiers, state)) continue;
+        zero_native_emit(host, (zero_native_gtk_event_t){
+            .kind = ZERO_NATIVE_GTK_EVENT_SHORTCUT,
+            .window_id = win->id,
+            .shortcut_id = shortcut->id,
+            .shortcut_id_len = strlen(shortcut->id),
+            .shortcut_key = shortcut->key,
+            .shortcut_key_len = strlen(shortcut->key),
+            .shortcut_modifiers = shortcut->modifiers,
+        });
+        return TRUE;
+    }
+    return FALSE;
+}
+
 static gboolean zero_native_frame_tick(gpointer data) {
     zero_native_gtk_host_t *host = data;
     zero_native_emit(host, (zero_native_gtk_event_t){ .kind = ZERO_NATIVE_GTK_EVENT_FRAME });
@@ -713,6 +813,9 @@ static zero_native_gtk_window_t *zero_native_create_window_internal(zero_native_
     g_signal_connect(win->gtk_window, "notify::is-active", G_CALLBACK(on_focus), win);
     g_signal_connect(win->gtk_window, "close-request", G_CALLBACK(on_close_request), win);
     g_signal_connect(win->web_view, "decide-policy", G_CALLBACK(on_decide_policy), win);
+    GtkEventController *shortcut_controller = gtk_event_controller_key_new();
+    g_signal_connect(shortcut_controller, "key-pressed", G_CALLBACK(on_shortcut_key_pressed), win);
+    gtk_widget_add_controller(GTK_WIDGET(win->gtk_window), shortcut_controller);
 
     return win;
 }
@@ -785,6 +888,7 @@ void zero_native_gtk_destroy(zero_native_gtk_host_t *host) {
     free(host->window_label);
     zero_native_free_string_list(host->allowed_origins, host->allowed_origins_count);
     zero_native_free_string_list(host->allowed_external_urls, host->allowed_external_urls_count);
+    zero_native_clear_shortcuts(host);
     free(host);
 }
 
@@ -933,6 +1037,30 @@ void zero_native_gtk_set_security_policy(zero_native_gtk_host_t *host, const cha
     host->allowed_origins = zero_native_parse_newline_list(allowed_origins, allowed_origins_len, &host->allowed_origins_count);
     host->allowed_external_urls = zero_native_parse_newline_list(external_urls, external_urls_len, &host->allowed_external_urls_count);
     host->external_link_action = external_action;
+}
+
+void zero_native_gtk_set_shortcuts(zero_native_gtk_host_t *host, const char *const *ids, const size_t *id_lens, const char *const *keys, const size_t *key_lens, const uint32_t *modifiers, size_t count) {
+    if (!host) return;
+    zero_native_clear_shortcuts(host);
+    if (!ids || !id_lens || !keys || !key_lens || !modifiers) return;
+    size_t limit = count < ZERO_NATIVE_MAX_SHORTCUTS ? count : ZERO_NATIVE_MAX_SHORTCUTS;
+    for (size_t i = 0; i < limit; i++) {
+        if (!ids[i] || !keys[i] || id_lens[i] == 0 || key_lens[i] == 0) continue;
+        zero_native_gtk_shortcut_t *shortcut = &host->shortcuts[host->shortcut_count];
+        shortcut->id = zero_native_strndup(ids[i], id_lens[i]);
+        shortcut->key = zero_native_strndup(keys[i], key_lens[i]);
+        shortcut->modifiers = modifiers[i];
+        if (!shortcut->id || !shortcut->key) {
+            free(shortcut->id);
+            free(shortcut->key);
+            memset(shortcut, 0, sizeof(*shortcut));
+            continue;
+        }
+        for (char *p = shortcut->key; *p; p++) {
+            if (*p >= 'A' && *p <= 'Z') *p = (char)(*p - 'A' + 'a');
+        }
+        host->shortcut_count++;
+    }
 }
 
 int zero_native_gtk_create_window(zero_native_gtk_host_t *host, uint64_t window_id, const char *window_title, size_t window_title_len, const char *window_label, size_t window_label_len, double x, double y, double width, double height, int restore_frame) {

@@ -5,6 +5,7 @@ export const PAGE_TITLES: Record<string, string> = {
   frontend: "Frontend Projects",
   windows: "Windows",
   webviews: "Multiple WebViews",
+  "keyboard-shortcuts": "Keyboard Shortcuts",
   bridge: "Bridge",
   "bridge/builtin-commands": "Builtin Commands",
   dialogs: "Dialogs",

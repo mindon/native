@@ -31,7 +31,15 @@ enum EventKind {
     kShutdown = 2,
     kResize = 3,
     kWindowFrame = 4,
+    kShortcut = 5,
 };
+
+constexpr uint32_t kShortcutModifierPrimary = 1u << 0;
+constexpr uint32_t kShortcutModifierCommand = 1u << 1;
+constexpr uint32_t kShortcutModifierControl = 1u << 2;
+constexpr uint32_t kShortcutModifierOption = 1u << 3;
+constexpr uint32_t kShortcutModifierShift = 1u << 4;
+constexpr size_t kMaxShortcuts = 64;
 
 struct WindowsEvent {
     int kind;
@@ -47,6 +55,11 @@ struct WindowsEvent {
     size_t label_len;
     const char *title;
     size_t title_len;
+    const char *shortcut_id;
+    size_t shortcut_id_len;
+    const char *shortcut_key;
+    size_t shortcut_key_len;
+    uint32_t shortcut_modifiers;
 };
 
 using EventCallback = void (*)(void *, const WindowsEvent *);
@@ -83,6 +96,12 @@ struct ChildWebView {
 #endif
 };
 
+struct Shortcut {
+    std::string id;
+    std::string key;
+    uint32_t modifiers = 0;
+};
+
 struct HostLifetime {
     std::recursive_mutex mutex;
     bool alive = true;
@@ -104,6 +123,7 @@ struct Host {
     uint64_t next_webview_order = 1;
     std::vector<std::string> allowed_origins;
     std::vector<std::string> allowed_external_urls;
+    std::vector<Shortcut> shortcuts;
     int external_link_action = 0;
     std::shared_ptr<HostLifetime> lifetime = std::make_shared<HostLifetime>();
 };
@@ -196,6 +216,84 @@ static void emit(Host *host, const Window &window, EventKind kind) {
     event.title = window.title.c_str();
     event.title_len = window.title.size();
     host->callback(host->callback_context, &event);
+}
+
+static std::string shortcutKeyFromWParam(WPARAM wparam) {
+    if (wparam >= 'A' && wparam <= 'Z') return std::string(1, static_cast<char>('a' + (wparam - 'A')));
+    if (wparam >= '0' && wparam <= '9') return std::string(1, static_cast<char>(wparam));
+    switch (wparam) {
+        case VK_ESCAPE: return "escape";
+        case VK_RETURN: return "enter";
+        case VK_TAB: return "tab";
+        case VK_SPACE: return "space";
+        case VK_BACK: return "backspace";
+        case VK_LEFT: return "arrowleft";
+        case VK_RIGHT: return "arrowright";
+        case VK_UP: return "arrowup";
+        case VK_DOWN: return "arrowdown";
+        case VK_OEM_PLUS: return "=";
+        case VK_OEM_MINUS: return "-";
+        case VK_OEM_COMMA: return ",";
+        case VK_OEM_PERIOD: return ".";
+        case VK_OEM_2: return "/";
+        case VK_OEM_1: return ";";
+        case VK_OEM_7: return "'";
+        case VK_OEM_4: return "[";
+        case VK_OEM_6: return "]";
+        case VK_OEM_5: return "\\";
+        case VK_OEM_3: return "`";
+        default: return std::string();
+    }
+}
+
+static bool keyDown(int virtual_key) {
+    return (GetKeyState(virtual_key) & 0x8000) != 0;
+}
+
+static bool shortcutModifiersMatch(uint32_t shortcut_modifiers) {
+    bool needs_control = (shortcut_modifiers & kShortcutModifierControl) != 0 ||
+        (shortcut_modifiers & kShortcutModifierPrimary) != 0;
+    bool needs_command = (shortcut_modifiers & kShortcutModifierCommand) != 0;
+    bool needs_option = (shortcut_modifiers & kShortcutModifierOption) != 0;
+    bool needs_shift = (shortcut_modifiers & kShortcutModifierShift) != 0;
+    bool has_control = keyDown(VK_CONTROL);
+    bool has_command = keyDown(VK_LWIN) || keyDown(VK_RWIN);
+    bool has_option = keyDown(VK_MENU);
+    bool has_shift = keyDown(VK_SHIFT);
+    return has_control == needs_control &&
+        has_command == needs_command &&
+        has_option == needs_option &&
+        has_shift == needs_shift;
+}
+
+static bool emitShortcutForKey(Host *host, HWND hwnd, WPARAM wparam) {
+    if (!host || host->shortcuts.empty()) return false;
+    std::string key = shortcutKeyFromWParam(wparam);
+    if (key.empty()) return false;
+    const Window *window = nullptr;
+    for (auto &entry : host->windows) {
+        if (entry.second.hwnd == hwnd) {
+            window = &entry.second;
+            break;
+        }
+    }
+    if (!window) return false;
+    for (const Shortcut &shortcut : host->shortcuts) {
+        if (shortcut.key != key) continue;
+        if (!shortcutModifiersMatch(shortcut.modifiers)) continue;
+        if (!host->callback) return true;
+        WindowsEvent event = {};
+        event.kind = kShortcut;
+        event.window_id = window->id;
+        event.shortcut_id = shortcut.id.c_str();
+        event.shortcut_id_len = shortcut.id.size();
+        event.shortcut_key = shortcut.key.c_str();
+        event.shortcut_key_len = shortcut.key.size();
+        event.shortcut_modifiers = shortcut.modifiers;
+        host->callback(host->callback_context, &event);
+        return true;
+    }
+    return false;
 }
 
 static std::string webViewKey(uint64_t window_id, const std::string &label) {
@@ -381,6 +479,10 @@ static LRESULT CALLBACK windowProc(HWND hwnd, UINT message, WPARAM wparam, LPARA
     }
     Host *host = hostFromWindow(hwnd);
     switch (message) {
+        case WM_KEYDOWN:
+        case WM_SYSKEYDOWN:
+            if (host && emitShortcutForKey(host, hwnd, wparam)) return 0;
+            break;
         case WM_SIZE:
             if (host) {
                 for (auto &entry : host->windows) {
@@ -584,6 +686,24 @@ void zero_native_windows_set_security_policy(Host *host, const char *allowed_ori
     host->allowed_origins = parseNewlineList(allowed_origins, allowed_origins_len);
     host->allowed_external_urls = parseNewlineList(external_urls, external_urls_len);
     host->external_link_action = external_action;
+}
+
+void zero_native_windows_set_shortcuts(Host *host, const char *const *ids, const size_t *id_lens, const char *const *keys, const size_t *key_lens, const uint32_t *modifiers, size_t count) {
+    if (!host) return;
+    host->shortcuts.clear();
+    if (!ids || !id_lens || !keys || !key_lens || !modifiers) return;
+    const size_t limit = count < kMaxShortcuts ? count : kMaxShortcuts;
+    for (size_t i = 0; i < limit; ++i) {
+        if (!ids[i] || !keys[i] || id_lens[i] == 0 || key_lens[i] == 0) continue;
+        Shortcut shortcut;
+        shortcut.id = slice(ids[i], id_lens[i]);
+        shortcut.key = slice(keys[i], key_lens[i]);
+        for (char &ch : shortcut.key) {
+            if (ch >= 'A' && ch <= 'Z') ch = static_cast<char>(ch - 'A' + 'a');
+        }
+        shortcut.modifiers = modifiers[i];
+        host->shortcuts.push_back(shortcut);
+    }
 }
 
 int zero_native_windows_create_window(Host *host, uint64_t window_id, const char *window_title, size_t window_title_len, const char *window_label, size_t window_label_len, double x, double y, double width, double height, int restore_frame) {

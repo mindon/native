@@ -16,6 +16,7 @@ typedef enum {
     ZERO_NATIVE_GTK_EVENT_SHUTDOWN = 2,
     ZERO_NATIVE_GTK_EVENT_RESIZE = 3,
     ZERO_NATIVE_GTK_EVENT_WINDOW_FRAME = 4,
+    ZERO_NATIVE_GTK_EVENT_SHORTCUT = 5,
 } zero_native_gtk_event_kind_t;
 
 typedef struct {
@@ -32,6 +33,11 @@ typedef struct {
     size_t label_len;
     const char *title;
     size_t title_len;
+    const char *shortcut_id;
+    size_t shortcut_id_len;
+    const char *shortcut_key;
+    size_t shortcut_key_len;
+    uint32_t shortcut_modifiers;
 } zero_native_gtk_event_t;
 
 typedef void (*zero_native_gtk_event_callback_t)(void *context, const zero_native_gtk_event_t *event);
@@ -92,6 +98,7 @@ void zero_native_gtk_bridge_respond_window(zero_native_gtk_host_t *host, uint64_
 void zero_native_gtk_bridge_respond_webview(zero_native_gtk_host_t *host, uint64_t window_id, const char *webview_label, size_t webview_label_len, const char *response, size_t response_len);
 void zero_native_gtk_emit_window_event(zero_native_gtk_host_t *host, uint64_t window_id, const char *name, size_t name_len, const char *detail_json, size_t detail_json_len);
 void zero_native_gtk_set_security_policy(zero_native_gtk_host_t *host, const char *allowed_origins, size_t allowed_origins_len, const char *external_urls, size_t external_urls_len, int external_action);
+void zero_native_gtk_set_shortcuts(zero_native_gtk_host_t *host, const char *const *ids, const size_t *id_lens, const char *const *keys, const size_t *key_lens, const uint32_t *modifiers, size_t count);
 int zero_native_gtk_create_window(zero_native_gtk_host_t *host, uint64_t window_id, const char *window_title, size_t window_title_len, const char *window_label, size_t window_label_len, double x, double y, double width, double height, int restore_frame);
 int zero_native_gtk_focus_window(zero_native_gtk_host_t *host, uint64_t window_id);
 int zero_native_gtk_close_window(zero_native_gtk_host_t *host, uint64_t window_id);

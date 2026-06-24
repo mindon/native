@@ -130,6 +130,23 @@ export interface ZeroNativeWebViewHandle extends ZeroNativeWebViewInfo {
   close(): Promise<ZeroNativeWebViewInfo>;
 }
 
+export interface ZeroNativeShortcutModifiers {
+  primary: boolean;
+  command: boolean;
+  control: boolean;
+  option: boolean;
+  shift: boolean;
+}
+
+export interface ZeroNativeShortcutDetail {
+  id: string;
+  /** Alias for `id`, kept for compatibility with older built-in shortcut events. */
+  command: string;
+  key: string;
+  windowId: number;
+  modifiers: ZeroNativeShortcutModifiers;
+}
+
 export interface ZeroNativeOpenFileOptions {
   title?: string;
   defaultPath?: string;
@@ -155,7 +172,9 @@ export interface ZeroNativeMessageDialogOptions {
 
 export interface ZeroNativeApi {
   invoke<T = ZeroNativeJson>(command: string, payload?: ZeroNativeJson): Promise<T>;
+  on(name: "shortcut", callback: (detail: ZeroNativeShortcutDetail) => void): () => void;
   on<T = ZeroNativeJson>(name: string, callback: (detail: T) => void): () => void;
+  off(name: "shortcut", callback: (detail: ZeroNativeShortcutDetail) => void): void;
   off<T = ZeroNativeJson>(name: string, callback: (detail: T) => void): void;
   windows: {
     create(options?: ZeroNativeCreateWindowOptions): Promise<ZeroNativeWindowInfo>;

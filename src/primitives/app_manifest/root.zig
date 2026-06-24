@@ -11,9 +11,11 @@ pub const ValidationError = error{
     DuplicateBridgeCommand,
     DuplicatePlatform,
     DuplicateWindow,
+    DuplicateShortcut,
     InvalidUrl,
     InvalidPath,
     InvalidCommand,
+    InvalidShortcut,
     InvalidTimeout,
     InvalidKeyword,
     MissingRequiredField,
@@ -199,6 +201,20 @@ pub const Window = struct {
     restore_policy: WindowRestorePolicy = .clamp_to_visible_screen,
 };
 
+pub const ShortcutModifiers = struct {
+    primary: bool = false,
+    command: bool = false,
+    control: bool = false,
+    option: bool = false,
+    shift: bool = false,
+};
+
+pub const Shortcut = struct {
+    id: []const u8,
+    key: []const u8,
+    modifiers: ShortcutModifiers = .{},
+};
+
 pub const PackageMetadata = struct {
     kind: PackageKind = .app,
     web_engine: WebEngine = .system,
@@ -225,6 +241,7 @@ pub const Manifest = struct {
     security: SecurityConfig = .{},
     platforms: []const PlatformSettings = &.{},
     windows: []const Window = &.{},
+    shortcuts: []const Shortcut = &.{},
     cef: CefConfig = .{},
     package: PackageMetadata = .{},
     updates: UpdateConfig = .{},
@@ -241,6 +258,7 @@ pub fn validateManifest(manifest: Manifest) ValidationError!void {
     try validateSecurity(manifest.security);
     try validatePlatforms(manifest.platforms);
     try validateWindows(manifest.windows);
+    try validateShortcuts(manifest.shortcuts);
     try validateCefConfig(manifest.package.web_engine, manifest.cef);
     try validatePackageMetadata(manifest.package);
     try validateUpdates(manifest.updates);
@@ -266,6 +284,17 @@ pub fn validateWindows(windows: []const Window) ValidationError!void {
         var prior: usize = 0;
         while (prior < index) : (prior += 1) {
             if (std.mem.eql(u8, windows[prior].label, window.label)) return error.DuplicateWindow;
+        }
+    }
+}
+
+pub fn validateShortcuts(shortcuts: []const Shortcut) ValidationError!void {
+    for (shortcuts, 0..) |shortcut, i| {
+        try validateName(shortcut.id);
+        try validateShortcutKey(shortcut.key);
+        for (shortcuts[0..i]) |previous| {
+            if (std.mem.eql(u8, previous.id, shortcut.id)) return error.DuplicateShortcut;
+            if (std.ascii.eqlIgnoreCase(previous.key, shortcut.key) and shortcutModifiersEql(previous.modifiers, shortcut.modifiers)) return error.DuplicateShortcut;
         }
     }
 }
@@ -461,6 +490,30 @@ fn validateReadyPath(path: []const u8) ValidationError!void {
     }
 }
 
+fn validateShortcutKey(key: []const u8) ValidationError!void {
+    if (key.len == 0 or key.len > 32) return error.InvalidShortcut;
+    if (key.len == 1) {
+        const ch = key[0];
+        if (ch <= ' ' or ch == 0x7f) return error.InvalidShortcut;
+        return;
+    }
+    const specials = [_][]const u8{
+        "escape",
+        "enter",
+        "tab",
+        "space",
+        "backspace",
+        "arrowleft",
+        "arrowright",
+        "arrowup",
+        "arrowdown",
+    };
+    for (&specials) |special| {
+        if (std.ascii.eqlIgnoreCase(key, special)) return;
+    }
+    return error.InvalidShortcut;
+}
+
 pub fn validatePlatforms(platforms: []const PlatformSettings) ValidationError!void {
     for (platforms, 0..) |settings, i| {
         if (settings.platform == .unknown) return error.MissingRequiredField;
@@ -532,6 +585,14 @@ fn permissionEql(a: Permission, b: Permission) bool {
     };
 }
 
+fn shortcutModifiersEql(a: ShortcutModifiers, b: ShortcutModifiers) bool {
+    return a.primary == b.primary and
+        a.command == b.command and
+        a.control == b.control and
+        a.option == b.option and
+        a.shift == b.shift;
+}
+
 fn isLowerAlpha(ch: u8) bool {
     return ch >= 'a' and ch <= 'z';
 }
@@ -555,6 +616,29 @@ test "valid minimal manifest" {
     };
 
     try validateManifest(manifest);
+}
+
+test "manifest validates keyboard shortcuts" {
+    const manifest: Manifest = .{
+        .identity = .{ .id = "com.example.app", .name = "example" },
+        .version = .{ .major = 1, .minor = 0, .patch = 0 },
+        .shortcuts = &.{
+            .{ .id = "command.palette", .key = "p", .modifiers = .{ .primary = true, .shift = true } },
+            .{ .id = "help", .key = "f", .modifiers = .{ .primary = true } },
+        },
+    };
+
+    try validateManifest(manifest);
+
+    const duplicate: Manifest = .{
+        .identity = .{ .id = "com.example.app", .name = "example" },
+        .version = .{ .major = 1, .minor = 0, .patch = 0 },
+        .shortcuts = &.{
+            .{ .id = "first", .key = "p", .modifiers = .{ .primary = true } },
+            .{ .id = "second", .key = "P", .modifiers = .{ .primary = true } },
+        },
+    };
+    try std.testing.expectError(error.DuplicateShortcut, validateManifest(duplicate));
 }
 
 test "frontend validation accepts managed dev server config" {

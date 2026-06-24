@@ -15,6 +15,7 @@ pub const RawManifest = struct {
     frontend: ?RawFrontend = null,
     security: RawSecurity = .{},
     windows: []const RawWindow = &.{},
+    shortcuts: []const RawShortcut = &.{},
 };
 
 pub const RawCef = struct {
@@ -68,4 +69,10 @@ pub const RawWindow = struct {
     x: ?f32 = null,
     y: ?f32 = null,
     restore_state: bool = true,
+};
+
+pub const RawShortcut = struct {
+    id: []const u8,
+    key: []const u8,
+    modifiers: []const []const u8 = &.{},
 };

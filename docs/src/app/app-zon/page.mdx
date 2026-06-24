@@ -31,6 +31,9 @@ The `app.zon` manifest declares app metadata, permissions, bridge policies, secu
     .windows = .{
         .{ .label = "main", .title = "zero-native", .width = 720, .height = 480, .restore_state = true },
     },
+    .shortcuts = .{
+        .{ .id = "command.palette", .key = "p", .modifiers = .{ "primary", "shift" } },
+    },
 }
 ```
 
@@ -97,11 +100,28 @@ The `app.zon` manifest declares app metadata, permissions, bridge policies, secu
       <td>Window definitions (see <a href="/windows">Windows</a>)</td>
     </tr>
     <tr>
+      <td><code>shortcuts</code></td>
+      <td>Keyboard shortcuts delivered as <code>shortcut</code> events (see <a href="/keyboard-shortcuts">Keyboard Shortcuts</a>)</td>
+    </tr>
+    <tr>
       <td><code>frontend</code></td>
       <td>Frontend build/dev config (see <a href="/frontend">Frontend Projects</a>)</td>
     </tr>
   </tbody>
 </table>
+
+## `shortcuts`
+
+The optional `shortcuts` list defines app-level keyboard shortcuts. Generated runners load these automatically:
+
+```zig
+.shortcuts = .{
+    .{ .id = "command.palette", .key = "p", .modifiers = .{ "primary", "shift" } },
+    .{ .id = "reload", .key = "r", .modifiers = .{ "primary" } },
+},
+```
+
+`id` is the event identifier, `key` is a printable key or named key, and `modifiers` accepts `primary`, `command`, `control`, `option`, `alt`, and `shift`.
 
 ## `frontend.dev`
 

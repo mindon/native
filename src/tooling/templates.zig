@@ -222,6 +222,7 @@ fn buildZig(allocator: std.mem.Allocator, names: TemplateNames, framework_path: 
         \\    const runner_mod = localModule(b, target, optimize, "src/runner.zig");
         \\    runner_mod.addImport("zero-native", zero_native_mod);
         \\    runner_mod.addImport("build_options", options_mod);
+        \\    runner_mod.addImport("app_manifest_zon", b.createModule(.{ .root_source_file = b.path("app.zon") }));
         \\
         \\    const app_mod = localModule(b, target, optimize, "src/main.zig");
         \\    app_mod.addImport("zero-native", zero_native_mod);
@@ -716,6 +717,8 @@ fn runnerZig() []const u8 {
     \\const std = @import("std");
     \\const build_options = @import("build_options");
     \\const zero_native = @import("zero-native");
+    \\const app_manifest = @import("app_manifest_zon");
+    \\const manifest_shortcuts = if (@hasField(@TypeOf(app_manifest), "shortcuts")) app_manifest.shortcuts else .{};
     \\
     \\pub const StdoutTraceSink = struct {
     \\    pub fn sink(self: *StdoutTraceSink) zero_native.trace.Sink {
@@ -740,7 +743,8 @@ fn runnerZig() []const u8 {
     \\    bridge: ?zero_native.BridgeDispatcher = null,
     \\    builtin_bridge: zero_native.BridgePolicy = .{},
     \\    security: zero_native.SecurityPolicy = .{},
-        \\    js_window_api: bool = false,
+    \\    js_window_api: bool = false,
+    \\    shortcuts: ?[]const zero_native.Shortcut = null,
     \\
     \\    fn appInfo(self: RunOptions) zero_native.AppInfo {
     \\        return .{
@@ -750,7 +754,54 @@ fn runnerZig() []const u8 {
     \\            .icon_path = self.icon_path,
     \\        };
     \\    }
+    \\
+    \\    fn resolvedShortcuts(self: RunOptions, storage: *ShortcutStorage) []const zero_native.Shortcut {
+    \\        return self.shortcuts orelse storage.fromManifest();
+    \\    }
     \\};
+    \\
+    \\const ShortcutStorage = struct {
+    \\    shortcuts: [zero_native.platform.max_shortcuts]zero_native.Shortcut = undefined,
+    \\
+    \\    fn fromManifest(self: *ShortcutStorage) []const zero_native.Shortcut {
+    \\        comptime {
+    \\            if (manifest_shortcuts.len > zero_native.platform.max_shortcuts) {
+    \\                @compileError("app.zon defines too many shortcuts");
+    \\            }
+    \\        }
+    \\
+    \\        inline for (manifest_shortcuts, 0..) |shortcut, index| {
+    \\            self.shortcuts[index] = .{
+    \\                .id = shortcut.id,
+    \\                .key = shortcut.key,
+    \\                .modifiers = shortcutModifiers(shortcut),
+    \\            };
+    \\        }
+    \\        return self.shortcuts[0..manifest_shortcuts.len];
+    \\    }
+    \\};
+    \\
+    \\fn shortcutModifiers(comptime shortcut: anytype) zero_native.ShortcutModifiers {
+    \\    const values = if (@hasField(@TypeOf(shortcut), "modifiers")) shortcut.modifiers else .{};
+    \\    var modifiers: zero_native.ShortcutModifiers = .{};
+    \\    inline for (values) |value| {
+    \\        const modifier: []const u8 = value;
+    \\        if (comptime std.mem.eql(u8, modifier, "primary")) {
+    \\            modifiers.primary = true;
+    \\        } else if (comptime std.mem.eql(u8, modifier, "command")) {
+    \\            modifiers.command = true;
+    \\        } else if (comptime std.mem.eql(u8, modifier, "control")) {
+    \\            modifiers.control = true;
+    \\        } else if (comptime std.mem.eql(u8, modifier, "option") or std.mem.eql(u8, modifier, "alt")) {
+    \\            modifiers.option = true;
+    \\        } else if (comptime std.mem.eql(u8, modifier, "shift")) {
+    \\            modifiers.shift = true;
+    \\        } else {
+    \\            @compileError("unknown app.zon shortcut modifier");
+    \\        }
+    \\    }
+    \\    return modifiers;
+    \\}
     \\
     \\pub fn runWithOptions(app: zero_native.App, options: RunOptions, init: std.process.Init) !void {
     \\    if (build_options.debug_overlay) {
@@ -786,6 +837,8 @@ fn runnerZig() []const u8 {
     \\        fanout_sink = .{ .sinks = &fanout_sinks };
     \\        runtime_trace_sink = fanout_sink.sink();
     \\    }
+    \\    var shortcut_storage: ShortcutStorage = .{};
+    \\    const shortcuts = options.resolvedShortcuts(&shortcut_storage);
     \\    var runtime = zero_native.Runtime.init(.{
     \\        .platform = null_platform.platform(),
     \\        .trace_sink = runtime_trace_sink,
@@ -793,7 +846,8 @@ fn runnerZig() []const u8 {
     \\        .bridge = options.bridge,
     \\        .builtin_bridge = options.builtin_bridge,
     \\        .security = options.security,
-        \\        .js_window_api = options.js_window_api,
+    \\        .js_window_api = options.js_window_api,
+    \\        .shortcuts = shortcuts,
     \\        .automation = if (build_options.automation) zero_native.automation.Server.init(init.io, ".zig-cache/zero-native-automation", app_info.resolvedWindowTitle()) else null,
     \\        .window_state_store = store,
     \\    });
@@ -821,6 +875,8 @@ fn runnerZig() []const u8 {
     \\        fanout_sink = .{ .sinks = &fanout_sinks };
     \\        runtime_trace_sink = fanout_sink.sink();
     \\    }
+    \\    var shortcut_storage: ShortcutStorage = .{};
+    \\    const shortcuts = options.resolvedShortcuts(&shortcut_storage);
     \\    var runtime = zero_native.Runtime.init(.{
     \\        .platform = mac_platform.platform(),
     \\        .trace_sink = runtime_trace_sink,
@@ -828,7 +884,8 @@ fn runnerZig() []const u8 {
     \\        .bridge = options.bridge,
     \\        .builtin_bridge = options.builtin_bridge,
     \\        .security = options.security,
-        \\        .js_window_api = options.js_window_api,
+    \\        .js_window_api = options.js_window_api,
+    \\        .shortcuts = shortcuts,
     \\        .automation = if (build_options.automation) zero_native.automation.Server.init(init.io, ".zig-cache/zero-native-automation", app_info.resolvedWindowTitle()) else null,
     \\        .window_state_store = store,
     \\    });
@@ -856,6 +913,8 @@ fn runnerZig() []const u8 {
     \\        fanout_sink = .{ .sinks = &fanout_sinks };
     \\        runtime_trace_sink = fanout_sink.sink();
     \\    }
+    \\    var shortcut_storage: ShortcutStorage = .{};
+    \\    const shortcuts = options.resolvedShortcuts(&shortcut_storage);
     \\    var runtime = zero_native.Runtime.init(.{
     \\        .platform = linux_platform.platform(),
     \\        .trace_sink = runtime_trace_sink,
@@ -863,7 +922,8 @@ fn runnerZig() []const u8 {
     \\        .bridge = options.bridge,
     \\        .builtin_bridge = options.builtin_bridge,
     \\        .security = options.security,
-        \\        .js_window_api = options.js_window_api,
+    \\        .js_window_api = options.js_window_api,
+    \\        .shortcuts = shortcuts,
     \\        .automation = if (build_options.automation) zero_native.automation.Server.init(init.io, ".zig-cache/zero-native-automation", app_info.resolvedWindowTitle()) else null,
     \\        .window_state_store = store,
     \\    });
@@ -891,6 +951,8 @@ fn runnerZig() []const u8 {
     \\        fanout_sink = .{ .sinks = &fanout_sinks };
     \\        runtime_trace_sink = fanout_sink.sink();
     \\    }
+    \\    var shortcut_storage: ShortcutStorage = .{};
+    \\    const shortcuts = options.resolvedShortcuts(&shortcut_storage);
     \\    var runtime = zero_native.Runtime.init(.{
     \\        .platform = windows_platform.platform(),
     \\        .trace_sink = runtime_trace_sink,
@@ -898,7 +960,8 @@ fn runnerZig() []const u8 {
     \\        .bridge = options.bridge,
     \\        .builtin_bridge = options.builtin_bridge,
     \\        .security = options.security,
-        \\        .js_window_api = options.js_window_api,
+    \\        .js_window_api = options.js_window_api,
+    \\        .shortcuts = shortcuts,
     \\        .automation = if (build_options.automation) zero_native.automation.Server.init(init.io, ".zig-cache/zero-native-automation", app_info.resolvedWindowTitle()) else null,
     \\        .window_state_store = store,
     \\    });
@@ -1828,6 +1891,8 @@ test "writeDefaultApp emits Vite project files" {
     defer std.testing.allocator.free(build_zig_text);
     const main_zig_text = try readTestFile(std.testing.allocator, std.testing.io, destination, "src/main.zig");
     defer std.testing.allocator.free(main_zig_text);
+    const runner_zig_text = try readTestFile(std.testing.allocator, std.testing.io, destination, "src/runner.zig");
+    defer std.testing.allocator.free(runner_zig_text);
     const package_json_text = try readTestFile(std.testing.allocator, std.testing.io, destination, "frontend/package.json");
     defer std.testing.allocator.free(package_json_text);
     const main_js_text = try readTestFile(std.testing.allocator, std.testing.io, destination, "frontend/src/main.js");
@@ -1846,8 +1911,12 @@ test "writeDefaultApp emits Vite project files" {
     try std.testing.expect(std.mem.indexOf(u8, build_zig_text, "cef-dir") != null);
     try std.testing.expect(std.mem.indexOf(u8, build_zig_text, "src/platform/macos/cef_host.mm") != null);
     try std.testing.expect(std.mem.indexOf(u8, build_zig_text, "src/platform/linux/gtk_host.c") != null);
+    try std.testing.expect(std.mem.indexOf(u8, build_zig_text, "app_manifest_zon") != null);
     try std.testing.expect(std.mem.indexOf(u8, main_zig_text, "frontend/dist") != null);
     try std.testing.expect(std.mem.indexOf(u8, main_zig_text, "127.0.0.1:5173") != null);
+    try std.testing.expect(std.mem.indexOf(u8, runner_zig_text, "@import(\"app_manifest_zon\")") != null);
+    try std.testing.expect(std.mem.indexOf(u8, runner_zig_text, "shortcuts: ?[]const zero_native.Shortcut = null") != null);
+    try std.testing.expect(std.mem.indexOf(u8, runner_zig_text, "resolvedShortcuts") != null);
     try std.testing.expect(std.mem.indexOf(u8, package_json_text, "\"vite\"") != null);
     try std.testing.expect(std.mem.indexOf(u8, main_js_text, "window.zero") != null);
 }

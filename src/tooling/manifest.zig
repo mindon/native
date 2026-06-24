@@ -24,6 +24,7 @@ pub const Metadata = struct {
     frontend: ?FrontendMetadata = null,
     security: SecurityMetadata = .{},
     windows: []const WindowMetadata = &.{},
+    shortcuts: []const ShortcutMetadata = &.{},
 
     pub fn displayName(self: Metadata) []const u8 {
         return self.display_name orelse self.name;
@@ -74,6 +75,13 @@ pub const Metadata = struct {
             if (window.title) |title| allocator.free(title);
         }
         if (self.windows.len > 0) allocator.free(self.windows);
+        for (self.shortcuts) |shortcut| {
+            allocator.free(shortcut.id);
+            allocator.free(shortcut.key);
+            for (shortcut.modifiers) |value| allocator.free(value);
+            if (shortcut.modifiers.len > 0) allocator.free(shortcut.modifiers);
+        }
+        if (self.shortcuts.len > 0) allocator.free(self.shortcuts);
     }
 };
 
@@ -91,6 +99,12 @@ pub const WindowMetadata = struct {
     x: ?f32 = null,
     y: ?f32 = null,
     restore_state: bool = true,
+};
+
+pub const ShortcutMetadata = struct {
+    id: []const u8,
+    key: []const u8,
+    modifiers: []const []const u8 = &.{},
 };
 
 pub const FrontendDevMetadata = struct {
@@ -130,6 +144,7 @@ const RawSecurity = raw_manifest.RawSecurity;
 const RawNavigation = raw_manifest.RawNavigation;
 const RawExternalLinks = raw_manifest.RawExternalLinks;
 const RawWindow = raw_manifest.RawWindow;
+const RawShortcut = raw_manifest.RawShortcut;
 
 pub fn validateFile(allocator: std.mem.Allocator, io: std.Io, path: []const u8) !ValidationResult {
     const source = try readFile(allocator, io, path);
@@ -152,6 +167,8 @@ pub fn validateFile(allocator: std.mem.Allocator, io: std.Io, path: []const u8) 
     const security = convertSecurity(metadata.security) catch return .{ .ok = false, .message = "app.zon security policy is invalid" };
     const windows = try convertWindows(allocator, metadata.windows);
     defer allocator.free(windows);
+    const shortcuts = parseShortcuts(allocator, metadata.shortcuts) catch return .{ .ok = false, .message = "app.zon shortcuts are invalid" };
+    defer allocator.free(shortcuts);
     const manifest_web_engine = parseWebEngine(metadata.web_engine) catch return .{ .ok = false, .message = "app.zon web engine is invalid" };
 
     const manifest: app_manifest.Manifest = .{
@@ -164,6 +181,7 @@ pub fn validateFile(allocator: std.mem.Allocator, io: std.Io, path: []const u8) 
         .security = security,
         .platforms = parsePlatformSettings(allocator, metadata.platforms) catch return .{ .ok = false, .message = "app.zon platforms are invalid" },
         .windows = windows,
+        .shortcuts = shortcuts,
         .cef = .{ .dir = metadata.cef.dir, .auto_install = metadata.cef.auto_install },
         .package = .{ .web_engine = manifest_web_engine },
     };
@@ -201,6 +219,7 @@ pub fn parseText(allocator: std.mem.Allocator, source: []const u8) !Metadata {
         .frontend = try convertRawFrontend(allocator, raw.frontend),
         .security = try convertRawSecurity(allocator, raw.security),
         .windows = try convertRawWindows(allocator, raw.windows),
+        .shortcuts = try convertRawShortcuts(allocator, raw.shortcuts),
     };
 }
 
@@ -270,6 +289,19 @@ fn convertRawWindows(allocator: std.mem.Allocator, windows: []const RawWindow) !
             .x = window.x,
             .y = window.y,
             .restore_state = window.restore_state,
+        };
+    }
+    return converted;
+}
+
+fn convertRawShortcuts(allocator: std.mem.Allocator, shortcuts: []const RawShortcut) ![]const ShortcutMetadata {
+    if (shortcuts.len == 0) return &.{};
+    const converted = try allocator.alloc(ShortcutMetadata, shortcuts.len);
+    for (shortcuts, 0..) |shortcut, index| {
+        converted[index] = .{
+            .id = try allocator.dupe(u8, shortcut.id),
+            .key = try allocator.dupe(u8, shortcut.key),
+            .modifiers = try duplicateStringList(allocator, shortcut.modifiers),
         };
     }
     return converted;
@@ -409,6 +441,40 @@ fn parseBridgeCommands(allocator: std.mem.Allocator, values: []const BridgeComma
     return commands.toOwnedSlice(allocator);
 }
 
+fn parseShortcuts(allocator: std.mem.Allocator, values: []const ShortcutMetadata) ![]const app_manifest.Shortcut {
+    if (values.len == 0) return &.{};
+    var shortcuts: std.ArrayList(app_manifest.Shortcut) = .empty;
+    errdefer shortcuts.deinit(allocator);
+    for (values) |value| {
+        try shortcuts.append(allocator, .{
+            .id = value.id,
+            .key = value.key,
+            .modifiers = try parseShortcutModifiers(value.modifiers),
+        });
+    }
+    return shortcuts.toOwnedSlice(allocator);
+}
+
+fn parseShortcutModifiers(values: []const []const u8) !app_manifest.ShortcutModifiers {
+    var modifiers: app_manifest.ShortcutModifiers = .{};
+    for (values) |value| {
+        if (std.mem.eql(u8, value, "primary")) {
+            modifiers.primary = true;
+        } else if (std.mem.eql(u8, value, "command")) {
+            modifiers.command = true;
+        } else if (std.mem.eql(u8, value, "control")) {
+            modifiers.control = true;
+        } else if (std.mem.eql(u8, value, "option") or std.mem.eql(u8, value, "alt")) {
+            modifiers.option = true;
+        } else if (std.mem.eql(u8, value, "shift")) {
+            modifiers.shift = true;
+        } else {
+            return error.InvalidShortcut;
+        }
+    }
+    return modifiers;
+}
+
 fn parsePlatformSettings(allocator: std.mem.Allocator, values: []const []const u8) ![]const app_manifest.PlatformSettings {
     if (values.len == 0) return &.{};
     var platforms: std.ArrayList(app_manifest.PlatformSettings) = .empty;
@@ -479,6 +545,9 @@ test "manifest metadata parser reads identity version and lists" {
         \\  .bridge = .{ .commands = .{ .{ .name = "native.ping" } } },
         \\  .web_engine = "chromium",
         \\  .cef = .{ .dir = "third_party/cef/macos", .auto_install = true },
+        \\  .shortcuts = .{
+        \\    .{ .id = "command.palette", .key = "p", .modifiers = .{ "primary", "shift" } },
+        \\  },
         \\}
     );
     defer metadata.deinit(std.testing.allocator);
@@ -491,6 +560,8 @@ test "manifest metadata parser reads identity version and lists" {
     try std.testing.expectEqualStrings("linux", metadata.platforms[1]);
     try std.testing.expectEqualStrings("webview", metadata.capabilities[1]);
     try std.testing.expectEqualStrings("native.ping", metadata.bridge_commands[0].name);
+    try std.testing.expectEqualStrings("command.palette", metadata.shortcuts[0].id);
+    try std.testing.expectEqualStrings("primary", metadata.shortcuts[0].modifiers[0]);
     try std.testing.expectEqualStrings("chromium", metadata.web_engine);
     try std.testing.expectEqualStrings("third_party/cef/macos", metadata.cef.dir);
     try std.testing.expect(metadata.cef.auto_install);

@@ -22,6 +22,8 @@ pub const CommandEvent = struct {
     name: []const u8,
 };
 
+pub const ShortcutEvent = platform.ShortcutEvent;
+
 pub const InvalidationReason = enum {
     startup,
     surface_resize,
@@ -40,11 +42,13 @@ pub const FrameDiagnostics = struct {
 pub const Event = union(enum) {
     lifecycle: LifecycleEvent,
     command: CommandEvent,
+    shortcut: ShortcutEvent,
 
     pub fn name(self: Event) []const u8 {
         return switch (self) {
             .lifecycle => |event_value| @tagName(event_value),
             .command => |event_value| event_value.name,
+            .shortcut => "shortcut",
         };
     }
 };
@@ -89,6 +93,7 @@ pub const Options = struct {
     bridge: ?bridge.Dispatcher = null,
     builtin_bridge: bridge.Policy = .{},
     security: security.Policy = .{},
+    shortcuts: []const platform.Shortcut = &.{},
     automation: ?automation.Server = null,
     window_state_store: ?window_state.Store = null,
     js_window_api: bool = false,
@@ -149,6 +154,7 @@ pub const Runtime = struct {
         }
         try self.log("runtime.init", "runtime initialized", init_fields[0..init_field_count]);
         try self.options.platform.services.configureSecurityPolicy(self.options.security);
+        try self.options.platform.services.configureShortcuts(self.options.shortcuts);
 
         var context: RunContext = .{ .runtime = self, .app = app };
         try self.options.platform.run(handlePlatformEvent, &context);
@@ -270,6 +276,11 @@ pub const Runtime = struct {
                 try self.log("tray.action", "tray item selected", &.{trace.uint("item_id", item_id)});
                 try self.dispatchEvent(app, .{ .command = .{ .name = "tray.action" } });
             },
+            .shortcut => |shortcut| {
+                try self.dispatchEvent(app, .{ .shortcut = shortcut });
+                self.emitShortcutEvent(shortcut) catch |err| try self.log("shortcut.emit_failed", @errorName(err), &.{trace.string("id", shortcut.id)});
+                self.invalidateFor(.command, null);
+            },
             .app_shutdown => {
                 try self.dispatchEvent(app, .{ .lifecycle = .stop });
                 if (self.options.extensions) |registry| try registry.stopAll(self.extensionContext());
@@ -289,6 +300,9 @@ pub const Runtime = struct {
                 if (self.options.extensions) |registry| {
                     try registry.dispatchCommand(self.extensionContext(), .{ .name = event_value.command.name });
                 }
+                self.invalidateFor(.command, null);
+            },
+            .shortcut => {
                 self.invalidateFor(.command, null);
             },
             .lifecycle => {},
@@ -618,6 +632,26 @@ pub const Runtime = struct {
         if (self.options.automation) |server| {
             server.publishBridgeResponse(response) catch |err| try self.log("automation.bridge_response_failed", @errorName(err), &.{});
         }
+    }
+
+    fn emitShortcutEvent(self: *Runtime, shortcut: platform.ShortcutEvent) anyerror!void {
+        var buffer: [512]u8 = undefined;
+        var writer = std.Io.Writer.fixed(&buffer);
+        try writer.writeAll("{\"id\":");
+        try json.writeString(&writer, shortcut.id);
+        try writer.writeAll(",\"command\":");
+        try json.writeString(&writer, shortcut.id);
+        try writer.writeAll(",\"key\":");
+        try json.writeString(&writer, shortcut.key);
+        try writer.print(",\"windowId\":{d},\"modifiers\":{{\"primary\":{},\"command\":{},\"control\":{},\"option\":{},\"shift\":{}}}}}", .{
+            shortcut.window_id,
+            shortcut.modifiers.primary,
+            shortcut.modifiers.command,
+            shortcut.modifiers.control,
+            shortcut.modifiers.option,
+            shortcut.modifiers.shift,
+        });
+        try self.emitWindowEvent(shortcut.window_id, "shortcut", writer.buffered());
     }
 
     fn allowsBuiltinBridgeCommand(self: *Runtime, command: []const u8, origin: []const u8, uses_window_permission: bool) bool {
@@ -1400,6 +1434,43 @@ test "runtime loads app source into platform webview" {
     try std.testing.expectEqual(platform.WebViewSourceKind.html, harness.null_platform.loaded_source.?.kind);
     try std.testing.expectEqualStrings("<h1>Hello</h1>", harness.null_platform.loaded_source.?.bytes);
     try std.testing.expectEqual(@as(u64, 1), harness.runtime.frameDiagnostics().frame_index);
+}
+
+test "runtime configures platform keyboard shortcuts" {
+    const TestApp = struct {
+        fn app(self: *@This()) App {
+            return .{ .context = self, .name = "shortcuts", .source = platform.WebViewSource.html("<h1>Shortcuts</h1>") };
+        }
+    };
+
+    const shortcuts = [_]platform.Shortcut{
+        .{ .id = "command.palette", .key = "p", .modifiers = .{ .primary = true, .shift = true } },
+    };
+    var harness: TestHarness() = undefined;
+    harness.init(.{});
+    harness.runtime.options.shortcuts = &shortcuts;
+    var app_state: TestApp = .{};
+    try harness.runtime.run(app_state.app());
+
+    try std.testing.expectEqual(@as(usize, 1), harness.null_platform.configuredShortcuts().len);
+    try std.testing.expectEqualStrings("command.palette", harness.null_platform.configuredShortcuts()[0].id);
+}
+
+test "runtime rejects invalid keyboard shortcuts" {
+    const TestApp = struct {
+        fn app(self: *@This()) App {
+            return .{ .context = self, .name = "invalid-shortcuts", .source = platform.WebViewSource.html("<h1>Shortcuts</h1>") };
+        }
+    };
+
+    const long_id = [_]u8{'x'} ** (platform.max_shortcut_id_bytes + 1);
+    const shortcuts = [_]platform.Shortcut{.{ .id = long_id[0..], .key = "p" }};
+    var harness: TestHarness() = undefined;
+    harness.init(.{});
+    harness.runtime.options.shortcuts = &shortcuts;
+    var app_state: TestApp = .{};
+
+    try std.testing.expectError(error.InvalidShortcut, harness.runtime.run(app_state.app()));
 }
 
 test "runtime rejects oversized webview source" {
