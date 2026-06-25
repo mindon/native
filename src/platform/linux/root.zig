@@ -178,6 +178,7 @@ pub const LinuxPlatform = struct {
                 .create_window_fn = createWindow,
                 .focus_window_fn = focusWindow,
                 .close_window_fn = closeWindow,
+                .create_view_fn = createView,
                 .create_webview_fn = createWebView,
                 .set_webview_frame_fn = setWebViewFrame,
                 .navigate_webview_fn = navigateWebView,
@@ -368,6 +369,11 @@ fn focusWindow(context: ?*anyopaque, window_id: platform_mod.WindowId) anyerror!
 fn closeWindow(context: ?*anyopaque, window_id: platform_mod.WindowId) anyerror!void {
     const self: *LinuxPlatform = @ptrCast(@alignCast(context.?));
     if (zero_native_gtk_close_window(self.host, window_id) == 0) return error.CloseFailed;
+}
+
+fn createView(context: ?*anyopaque, options: platform_mod.ViewOptions) anyerror!void {
+    if (options.kind == .webview) return createWebView(context, options.webViewOptions());
+    return error.UnsupportedViewKind;
 }
 
 fn createWebView(context: ?*anyopaque, options: platform_mod.WebViewOptions) anyerror!void {
