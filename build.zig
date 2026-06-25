@@ -381,6 +381,24 @@ pub fn build(b: *std.Build) void {
         \\  sleep 0.1
         \\done
         \\case "$snapshot" in *'view @w1/status-label kind=label'*'Refreshed from shortcut. Count 4.'*) ;; *) echo "native-shell shortcut command did not update status" >&2; exit 1 ;; esac
+        \\"$cli" automate menu-command app.preview.open >/dev/null 2>&1
+        \\attempts=0
+        \\while [ "$attempts" -lt 50 ]; do
+        \\  snapshot="$(cat "$automation_dir/snapshot.txt" 2>/dev/null || true)"
+        \\  case "$snapshot" in *'view @w1/preview kind=webview'*'bounds=(520,96 320x220)'*) break ;; esac
+        \\  attempts=$((attempts + 1))
+        \\  sleep 0.1
+        \\done
+        \\case "$snapshot" in *'view @w1/preview kind=webview'*'bounds=(520,96 320x220)'*) ;; *) echo "native-shell preview WebView was not created" >&2; exit 1 ;; esac
+        \\"$cli" automate menu-command app.preview.close >/dev/null 2>&1
+        \\attempts=0
+        \\while [ "$attempts" -lt 50 ]; do
+        \\  snapshot="$(cat "$automation_dir/snapshot.txt" 2>/dev/null || true)"
+        \\  case "$snapshot" in *'view @w1/preview kind=webview'*) ;; *) break ;; esac
+        \\  attempts=$((attempts + 1))
+        \\  sleep 0.1
+        \\done
+        \\case "$snapshot" in *'view @w1/preview kind=webview'*) echo "native-shell preview WebView was not closed" >&2; exit 1 ;; *) ;; esac
         \\echo "native-shell smoke ok"
         ,
         "sh",

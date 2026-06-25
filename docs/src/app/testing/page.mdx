@@ -48,7 +48,7 @@ This step:
 
 The CEF smoke step additionally requires a local CEF layout or `-Dcef-auto-install=true`; it exercises `native.ping` and child WebView create/resize/navigate/close through the automation bridge. These steps are intentionally opt-in because they need a GUI-capable macOS session.
 
-The native-shell smoke step launches `examples/native-shell`, verifies toolbar/sidebar/statusbar/WebView rows in the automation snapshot, drives a main-window resize and checks relayout bounds, dispatches `app.refresh` through bridge, menu, toolbar, and shortcut command paths, and checks that the native status label reflects each command source.
+The native-shell smoke step launches `examples/native-shell`, verifies toolbar/sidebar/statusbar/WebView rows in the automation snapshot, drives a main-window resize and checks relayout bounds, dispatches `app.refresh` through bridge, menu, toolbar, and shortcut command paths, creates and closes a child preview WebView, and checks that the native status label reflects each command source.
 
 ## NullPlatform
 

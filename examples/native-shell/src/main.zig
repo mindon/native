@@ -9,6 +9,9 @@ const window_height: f32 = 760;
 const toolbar_height: f32 = 52;
 const sidebar_width: f32 = 240;
 const statusbar_height: f32 = 40;
+const preview_label = "preview";
+const preview_url = "zero://inline";
+const preview_frame = zero_native.geometry.RectF.init(520, 96, 320, 220);
 
 const html =
     \\<!doctype html>
@@ -168,6 +171,7 @@ const shell_scene: zero_native.ShellConfig = .{ .windows = &shell_windows };
 const NativeShellApp = struct {
     refresh_count: u32 = 0,
     last_command_source: zero_native.CommandSource = .runtime,
+    preview_open: bool = false,
 
     fn app(self: *@This()) zero_native.App {
         return .{
@@ -190,6 +194,10 @@ const NativeShellApp = struct {
             .command => |command| {
                 if (std.mem.eql(u8, command.name, "app.refresh")) {
                     try self.refresh(runtime, command.source);
+                } else if (std.mem.eql(u8, command.name, "app.preview.open")) {
+                    try self.openPreview(runtime);
+                } else if (std.mem.eql(u8, command.name, "app.preview.close")) {
+                    try self.closePreview(runtime);
                 }
             },
             .shortcut, .files_dropped, .lifecycle => {},
@@ -201,6 +209,34 @@ const NativeShellApp = struct {
         self.last_command_source = source;
         var status_buffer: [128]u8 = undefined;
         const status = try std.fmt.bufPrint(&status_buffer, "Refreshed from {s}. Count {d}.", .{ @tagName(source), self.refresh_count });
+        try self.setStatus(runtime, status);
+    }
+
+    fn openPreview(self: *@This(), runtime: *zero_native.Runtime) anyerror!void {
+        if (!self.preview_open) {
+            _ = try runtime.createView(.{
+                .window_id = 1,
+                .label = preview_label,
+                .kind = .webview,
+                .url = preview_url,
+                .frame = preview_frame,
+                .layer = 30,
+            });
+            self.preview_open = true;
+        }
+        try self.setStatus(runtime, "Preview WebView open.");
+    }
+
+    fn closePreview(self: *@This(), runtime: *zero_native.Runtime) anyerror!void {
+        if (self.preview_open) {
+            try runtime.closeView(1, preview_label);
+            self.preview_open = false;
+        }
+        try self.setStatus(runtime, "Preview WebView closed.");
+    }
+
+    fn setStatus(self: *@This(), runtime: *zero_native.Runtime, status: []const u8) anyerror!void {
+        _ = self;
         _ = try runtime.updateView(1, "status-label", .{ .text = status });
     }
 };
@@ -264,6 +300,22 @@ test "native shell starts with native chrome views" {
     } });
     try std.testing.expectEqual(@as(u32, 3), app.refresh_count);
     try std.testing.expectEqual(zero_native.CommandSource.shortcut, app.last_command_source);
+
+    try harness.runtime.dispatchPlatformEvent(app.app(), .{ .menu_command = .{
+        .name = "app.preview.open",
+        .window_id = 1,
+    } });
+    try std.testing.expect(app.preview_open);
+    const preview_views = harness.runtime.listViews(1, &views_buffer);
+    try std.testing.expect(containsView(preview_views, preview_label, .webview));
+
+    try harness.runtime.dispatchPlatformEvent(app.app(), .{ .menu_command = .{
+        .name = "app.preview.close",
+        .window_id = 1,
+    } });
+    try std.testing.expect(!app.preview_open);
+    const closed_views = harness.runtime.listViews(1, &views_buffer);
+    try std.testing.expect(!containsView(closed_views, preview_label, .webview));
 }
 
 fn containsView(views: []const zero_native.ViewInfo, label: []const u8, kind: zero_native.ViewKind) bool {

@@ -10,6 +10,8 @@
     .commands = .{
         .{ .id = "app.refresh", .title = "Refresh" },
         .{ .id = "app.view.mode", .title = "View Mode" },
+        .{ .id = "app.preview.open", .title = "Open Preview" },
+        .{ .id = "app.preview.close", .title = "Close Preview" },
     },
     .shortcuts = .{
         .{ .id = "app.refresh", .key = "r", .modifiers = .{ "primary" } },
@@ -19,6 +21,8 @@
             .title = "View",
             .items = .{
                 .{ .label = "Refresh", .command = "app.refresh", .key = "r", .modifiers = .{ "primary" } },
+                .{ .label = "Open Preview", .command = "app.preview.open" },
+                .{ .label = "Close Preview", .command = "app.preview.close" },
             },
         },
     },
