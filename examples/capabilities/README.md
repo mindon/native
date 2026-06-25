@@ -3,11 +3,13 @@
 This example shows guarded OS capabilities from trusted WebView code:
 
 - Platform support discovery.
+- Open URL, reveal path, and recent document OS services.
 - Notifications.
 - Clipboard text read and write.
 - Message dialogs.
 - Credential set, get, and delete.
 - File-drop events delivered to Zig and the WebView event bridge.
+- App activation and deactivation events.
 
 Run with the system backend:
 

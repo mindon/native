@@ -11,13 +11,15 @@ const statusbar_height: f32 = 34;
 const html =
     \\<!doctype html><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
     \\<meta http-equiv="Content-Security-Policy" content="default-src 'self';script-src 'self' 'unsafe-inline';style-src 'self' 'unsafe-inline'">
-    \\<style>:root{color-scheme:light dark}*{box-sizing:border-box}body{margin:0;min-height:100vh;font-family:-apple-system,BlinkMacSystemFont,"SF Pro Text",Segoe UI,system-ui,sans-serif;background:#f8f9fb;color:#18181b}main{padding:34px 38px 48px;display:grid;gap:20px}h1{margin:0;font-size:30px;line-height:1.1;font-weight:650;letter-spacing:0}p{margin:0;max-width:680px;color:#636b76;line-height:1.55}.actions{display:grid;grid-template-columns:repeat(2,minmax(180px,1fr));gap:10px;max-width:620px}button{min-height:40px;border:1px solid #d8dde4;border-radius:7px;padding:9px 13px;font:inherit;font-weight:590;text-align:left;color:#18181b;background:white;cursor:pointer}.primary{color:white;background:#18181b;border-color:#18181b}pre{width:min(720px,100%);min-height:130px;margin:0;padding:14px 16px;overflow:auto;border:1px solid #dde2e8;border-radius:7px;background:white;color:#374151;font-size:13px;line-height:1.45}@media (prefers-color-scheme:dark){body{background:#101214;color:#f4f4f5}p{color:#a1a1aa}button{color:#f4f4f5;background:#171a20;border-color:#2b3038}.primary{color:#101214;background:#f4f4f5;border-color:#f4f4f5}pre{color:#d4d4d8;background:#171a20;border-color:#2b3038}}</style>
-    \\<main><h1>Capabilities</h1><p>Trusted WebView code can call native OS services only after the app grants explicit permissions and command policies.</p><div class="actions"><button class="primary" id="notify" type="button">Send Notification</button><button id="support" type="button">Check Support</button><button id="clipboard" type="button">Clipboard Round Trip</button><button id="message" type="button">Show Message</button><button id="credentials" type="button">Credential Round Trip</button></div><pre id="output">Ready.</pre></main>
-    \\<script>const out=document.querySelector("#output"),show=v=>out.textContent=JSON.stringify(v,null,2),fail=e=>out.textContent=`${e.code||"error"}: ${e.message}`,invoke=(c,p)=>window.zero.invoke(c,p);document.querySelector("#notify").onclick=async()=>{try{show(await invoke("zero-native.os.showNotification",{title:"Capabilities",subtitle:"zero-native",body:"Notification bridge succeeded."}))}catch(e){fail(e)}};document.querySelector("#support").onclick=async()=>{try{const features=["notifications","dialogs","clipboard_text","clipboard_rich_data","credentials","file_drops"];const support={};for(const feature of features){support[feature]=await invoke("zero-native.platform.supports",{feature})}show(support)}catch(e){fail(e)}};document.querySelector("#clipboard").onclick=async()=>{try{await invoke("zero-native.clipboard.writeText",{text:"Copied from zero-native"});show({text:await invoke("zero-native.clipboard.readText",{})})}catch(e){fail(e)}};document.querySelector("#message").onclick=async()=>{try{show(await invoke("zero-native.dialog.showMessage",{style:"info",title:"Capabilities",message:"Native dialog bridge succeeded.",primaryButton:"OK"}))}catch(e){fail(e)}};document.querySelector("#credentials").onclick=async()=>{try{const key={service:"dev.zero-native.capabilities",account:"demo"};await invoke("zero-native.credentials.set",{...key,secret:"demo-token"});const token=await invoke("zero-native.credentials.get",key),deleted=await invoke("zero-native.credentials.delete",key);show({token,deleted})}catch(e){fail(e)}};window.addEventListener("zero:drop:files",e=>show(e.detail));</script>
+    \\<style>:root{color-scheme:light dark}body{margin:0;padding:32px;font-family:-apple-system,BlinkMacSystemFont,"SF Pro Text",Segoe UI,system-ui,sans-serif;background:#f8f9fb;color:#18181b}h1{margin:0 0 10px;font-size:30px;letter-spacing:0}.actions{display:grid;grid-template-columns:repeat(2,minmax(170px,1fr));gap:10px;max-width:740px;margin:20px 0}button{min-height:40px;border:1px solid #d8dde4;border-radius:7px;padding:9px 13px;font:inherit;font-weight:590;text-align:left;background:white}.primary{color:white;background:#18181b;border-color:#18181b}pre{max-width:760px;min-height:140px;padding:14px 16px;overflow:auto;border:1px solid #dde2e8;border-radius:7px;background:white;color:#374151;font-size:13px;line-height:1.45}@media(prefers-color-scheme:dark){body{background:#101214;color:#f4f4f5}button,pre{color:#f4f4f5;background:#171a20;border-color:#2b3038}.primary{color:#101214;background:#f4f4f5}}</style>
+    \\<h1>Capabilities</h1><p>Trusted WebView code can call native OS services only after explicit permissions and command policies.</p><div class="actions"><button class="primary" id="notify">Send Notification</button><button id="support">Check Support</button><button id="open">Open URL</button><button id="reveal">Reveal Path</button><button id="recent">Recent Documents</button><button id="clipboard">Clipboard Round Trip</button><button id="message">Show Message</button><button id="credentials">Credential Round Trip</button></div><pre id="output">Ready.</pre>
+    \\<script>const q=s=>document.querySelector(s),out=q("#output"),show=v=>out.textContent=JSON.stringify(v,null,2),fail=e=>out.textContent=(e.code||"error")+": "+e.message,inv=(c,p)=>window.zero.invoke(c,p),doc="/tmp/zero-native-example.txt",recent="/tmp/recent-zero-native-example.txt";q("#notify").onclick=async()=>{try{show(await inv("zero-native.os.showNotification",{title:"Capabilities",subtitle:"zero-native",body:"Notification bridge succeeded."}))}catch(e){fail(e)}};q("#support").onclick=async()=>{try{let r={},f=["open_url","reveal_path","recent_documents","notifications","dialogs","clipboard_text","clipboard_rich_data","credentials","file_drops","app_activation_events"];for(const x of f)r[x]=await inv("zero-native.platform.supports",{feature:x});show(r)}catch(e){fail(e)}};q("#open").onclick=async()=>{try{show({opened:await inv("zero-native.os.openUrl",{url:"https://example.com/docs/start"})})}catch(e){fail(e)}};q("#reveal").onclick=async()=>{try{show({revealed:await inv("zero-native.os.revealPath",{path:doc})})}catch(e){fail(e)}};q("#recent").onclick=async()=>{try{await inv("zero-native.os.addRecentDocument",{path:recent});show({cleared:await inv("zero-native.os.clearRecentDocuments",{})})}catch(e){fail(e)}};q("#clipboard").onclick=async()=>{try{await inv("zero-native.clipboard.writeText",{text:"Copied from zero-native"});show({text:await inv("zero-native.clipboard.readText",{})})}catch(e){fail(e)}};q("#message").onclick=async()=>{try{show(await inv("zero-native.dialog.showMessage",{style:"info",title:"Capabilities",message:"Native dialog bridge succeeded.",primaryButton:"OK"}))}catch(e){fail(e)}};q("#credentials").onclick=async()=>{try{const key={service:"dev.zero-native.capabilities",account:"demo"};await inv("zero-native.credentials.set",{...key,secret:"demo-token"});show({token:await inv("zero-native.credentials.get",key),deleted:await inv("zero-native.credentials.delete",key)})}catch(e){fail(e)}};window.addEventListener("zero:drop:files",e=>show(e.detail));if(window.zero&&window.zero.on){window.zero.on("app:activate",d=>show({event:"app:activate",detail:d}));window.zero.on("app:deactivate",d=>show({event:"app:deactivate",detail:d}))}</script>
 ;
 
 const app_permissions = [_][]const u8{
     zero_native.security.permission_window,
+    zero_native.security.permission_network,
+    zero_native.security.permission_filesystem,
     zero_native.security.permission_notifications,
     zero_native.security.permission_dialog,
     zero_native.security.permission_clipboard,
@@ -25,13 +27,19 @@ const app_permissions = [_][]const u8{
 };
 const bridge_origins = [_][]const u8{ "zero://inline", "zero://app" };
 const platform_permission = [_][]const u8{zero_native.security.permission_window};
+const network_permission = [_][]const u8{zero_native.security.permission_network};
+const filesystem_permission = [_][]const u8{zero_native.security.permission_filesystem};
 const notification_permission = [_][]const u8{zero_native.security.permission_notifications};
 const dialog_permission = [_][]const u8{zero_native.security.permission_dialog};
 const clipboard_permission = [_][]const u8{zero_native.security.permission_clipboard};
 const credential_permission = [_][]const u8{zero_native.security.permission_credentials};
 const builtin_policies = [_]zero_native.BridgeCommandPolicy{
     .{ .name = "zero-native.platform.supports", .permissions = &platform_permission, .origins = &bridge_origins },
+    .{ .name = "zero-native.os.openUrl", .permissions = &network_permission, .origins = &bridge_origins },
     .{ .name = "zero-native.os.showNotification", .permissions = &notification_permission, .origins = &bridge_origins },
+    .{ .name = "zero-native.os.revealPath", .permissions = &filesystem_permission, .origins = &bridge_origins },
+    .{ .name = "zero-native.os.addRecentDocument", .permissions = &filesystem_permission, .origins = &bridge_origins },
+    .{ .name = "zero-native.os.clearRecentDocuments", .permissions = &filesystem_permission, .origins = &bridge_origins },
     .{ .name = "zero-native.dialog.showMessage", .permissions = &dialog_permission, .origins = &bridge_origins },
     .{ .name = "zero-native.clipboard.readText", .permissions = &clipboard_permission, .origins = &bridge_origins },
     .{ .name = "zero-native.clipboard.writeText", .permissions = &clipboard_permission, .origins = &bridge_origins },
@@ -57,6 +65,8 @@ const shell_scene: zero_native.ShellConfig = .{ .windows = &shell_windows };
 
 const CapabilitiesApp = struct {
     drop_count: u32 = 0,
+    activation_count: u32 = 0,
+    deactivation_count: u32 = 0,
     last_drop_paths: []const u8 = "",
 
     fn app(self: *@This()) zero_native.App {
@@ -84,7 +94,18 @@ const CapabilitiesApp = struct {
                 const status = try std.fmt.bufPrint(&status_buffer, "Received file drop {d}: {s}", .{ self.drop_count, drop.paths });
                 _ = try runtime.updateView(drop.window_id, "status-label", .{ .text = status });
             },
-            .command, .shortcut, .lifecycle => {},
+            .lifecycle => |lifecycle| switch (lifecycle) {
+                .activate => {
+                    self.activation_count += 1;
+                    _ = try runtime.updateView(1, "status-label", .{ .text = "App activated." });
+                },
+                .deactivate => {
+                    self.deactivation_count += 1;
+                    _ = try runtime.updateView(1, "status-label", .{ .text = "App deactivated." });
+                },
+                else => {},
+            },
+            .command, .shortcut => {},
         }
     }
 };
@@ -100,7 +121,13 @@ pub fn main(init: std.process.Init) !void {
         .builtin_bridge = .{ .enabled = true, .commands = &builtin_policies },
         .security = .{
             .permissions = &app_permissions,
-            .navigation = .{ .allowed_origins = &bridge_origins },
+            .navigation = .{
+                .allowed_origins = &bridge_origins,
+                .external_links = .{
+                    .action = .open_system_browser,
+                    .allowed_urls = &.{"https://example.com/docs/*"},
+                },
+            },
         },
     }, init);
 }
@@ -111,7 +138,13 @@ test "capabilities bridge gates native services and dispatches file drops" {
     harness.runtime.options.builtin_bridge = .{ .enabled = true, .commands = &builtin_policies };
     harness.runtime.options.security = .{
         .permissions = &app_permissions,
-        .navigation = .{ .allowed_origins = &bridge_origins },
+        .navigation = .{
+            .allowed_origins = &bridge_origins,
+            .external_links = .{
+                .action = .open_system_browser,
+                .allowed_urls = &.{"https://example.com/docs/*"},
+            },
+        },
     };
 
     var app_state = CapabilitiesApp{};
@@ -125,6 +158,23 @@ test "capabilities bridge gates native services and dispatches file drops" {
 
     try dispatchBridge(&harness, app, "{\"id\":\"support\",\"command\":\"zero-native.platform.supports\",\"payload\":{\"feature\":\"notifications\"}}");
     try std.testing.expect(std.mem.indexOf(u8, harness.null_platform.lastBridgeResponse(), "\"result\":true") != null);
+    try dispatchBridge(&harness, app, "{\"id\":\"support-recent\",\"command\":\"zero-native.platform.supports\",\"payload\":{\"feature\":\"recentDocuments\"}}");
+    try std.testing.expect(std.mem.indexOf(u8, harness.null_platform.lastBridgeResponse(), "\"result\":true") != null);
+
+    try dispatchBridge(&harness, app, "{\"id\":\"open\",\"command\":\"zero-native.os.openUrl\",\"payload\":{\"url\":\"https://example.com/docs/start\"}}");
+    try std.testing.expect(std.mem.indexOf(u8, harness.null_platform.lastBridgeResponse(), "\"ok\":true") != null);
+    try std.testing.expectEqualStrings("https://example.com/docs/start", harness.null_platform.lastExternalUrl());
+
+    try dispatchBridge(&harness, app, "{\"id\":\"reveal\",\"command\":\"zero-native.os.revealPath\",\"payload\":{\"path\":\"/tmp/zero-native-example.txt\"}}");
+    try std.testing.expect(std.mem.indexOf(u8, harness.null_platform.lastBridgeResponse(), "\"ok\":true") != null);
+    try std.testing.expectEqualStrings("/tmp/zero-native-example.txt", harness.null_platform.lastRevealedPath());
+
+    try dispatchBridge(&harness, app, "{\"id\":\"recent\",\"command\":\"zero-native.os.addRecentDocument\",\"payload\":{\"path\":\"/tmp/recent-zero-native-example.txt\"}}");
+    try std.testing.expect(std.mem.indexOf(u8, harness.null_platform.lastBridgeResponse(), "\"ok\":true") != null);
+    try std.testing.expectEqualStrings("/tmp/recent-zero-native-example.txt", harness.null_platform.lastRecentDocumentPath());
+    try dispatchBridge(&harness, app, "{\"id\":\"clear-recent\",\"command\":\"zero-native.os.clearRecentDocuments\",\"payload\":{}}");
+    try std.testing.expect(std.mem.indexOf(u8, harness.null_platform.lastBridgeResponse(), "\"ok\":true") != null);
+    try std.testing.expectEqual(@as(usize, 1), harness.null_platform.recentDocumentsClearedCount());
 
     try dispatchBridge(&harness, app, "{\"id\":\"write\",\"command\":\"zero-native.clipboard.writeText\",\"payload\":{\"text\":\"plain text\"}}");
     try std.testing.expect(std.mem.indexOf(u8, harness.null_platform.lastBridgeResponse(), "\"ok\":true") != null);
@@ -146,6 +196,13 @@ test "capabilities bridge gates native services and dispatches file drops" {
     try std.testing.expectEqual(@as(u32, 1), app_state.drop_count);
     try std.testing.expectEqualStrings("/tmp/one.txt\n/tmp/two.txt", app_state.last_drop_paths);
     try std.testing.expectEqualStrings("drop:files", harness.null_platform.lastWindowEventName());
+
+    try harness.runtime.dispatchPlatformEvent(app, .app_activated);
+    try std.testing.expectEqual(@as(u32, 1), app_state.activation_count);
+    try std.testing.expectEqualStrings("app:activate", harness.null_platform.lastWindowEventName());
+    try harness.runtime.dispatchPlatformEvent(app, .app_deactivated);
+    try std.testing.expectEqual(@as(u32, 1), app_state.deactivation_count);
+    try std.testing.expectEqualStrings("app:deactivate", harness.null_platform.lastWindowEventName());
 }
 
 fn dispatchBridge(harness: *zero_native.TestHarness(), app: zero_native.App, bytes: []const u8) !void {
