@@ -95,6 +95,7 @@ extern fn zero_native_windows_reveal_path(host: *WindowsHost, path: [*]const u8,
 extern fn zero_native_windows_show_open_dialog(host: *WindowsHost, opts: *const WindowsOpenDialogOpts, buffer: [*]u8, buffer_len: usize) WindowsOpenDialogResult;
 extern fn zero_native_windows_show_save_dialog(host: *WindowsHost, opts: *const WindowsSaveDialogOpts, buffer: [*]u8, buffer_len: usize) usize;
 extern fn zero_native_windows_show_message_dialog(host: *WindowsHost, opts: *const WindowsMessageDialogOpts) c_int;
+extern fn zero_native_windows_show_notification(host: *WindowsHost, title: [*]const u8, title_len: usize, subtitle: [*]const u8, subtitle_len: usize, body: [*]const u8, body_len: usize) c_int;
 extern fn zero_native_windows_add_recent_document(host: *WindowsHost, path: [*]const u8, path_len: usize) c_int;
 extern fn zero_native_windows_clear_recent_documents(host: *WindowsHost) c_int;
 extern fn zero_native_windows_set_credential(host: *WindowsHost, service: [*]const u8, service_len: usize, account: [*]const u8, account_len: usize, secret: [*]const u8, secret_len: usize) c_int;
@@ -215,6 +216,7 @@ pub const WindowsPlatform = struct {
                 .show_open_dialog_fn = showOpenDialog,
                 .show_save_dialog_fn = showSaveDialog,
                 .show_message_dialog_fn = showMessageDialog,
+                .show_notification_fn = showNotification,
                 .open_external_url_fn = openExternalUrl,
                 .reveal_path_fn = revealPath,
                 .add_recent_document_fn = addRecentDocument,
@@ -599,6 +601,20 @@ fn showMessageDialog(context: ?*anyopaque, options: platform_mod.MessageDialogOp
         .tertiary_button_len = options.tertiary_button.len,
     };
     return @enumFromInt(zero_native_windows_show_message_dialog(self.host, &opts));
+}
+
+fn showNotification(context: ?*anyopaque, options: platform_mod.NotificationOptions) anyerror!void {
+    const self: *WindowsPlatform = @ptrCast(@alignCast(context.?));
+    if (self.web_engine != .system) return error.UnsupportedService;
+    if (zero_native_windows_show_notification(
+        self.host,
+        options.title.ptr,
+        options.title.len,
+        options.subtitle.ptr,
+        options.subtitle.len,
+        options.body.ptr,
+        options.body.len,
+    ) == 0) return error.UnsupportedService;
 }
 
 fn openExternalUrl(context: ?*anyopaque, url: []const u8) anyerror!void {

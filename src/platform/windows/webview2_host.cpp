@@ -222,6 +222,7 @@ struct Host {
     std::vector<Shortcut> shortcuts;
     int external_link_action = 0;
     bool app_active = false;
+    bool notification_icon_added = false;
     std::shared_ptr<HostLifetime> lifetime = std::make_shared<HostLifetime>();
 };
 
@@ -286,6 +287,45 @@ static HWND parentWindow(Host *host) {
         if (entry.second.hwnd) return entry.second.hwnd;
     }
     return nullptr;
+}
+
+static void copyWideField(wchar_t *dest, size_t dest_len, const std::wstring &value) {
+    if (!dest || dest_len == 0) return;
+    size_t count = std::min(value.size(), dest_len - 1);
+    if (count > 0) memcpy(dest, value.data(), count * sizeof(wchar_t));
+    dest[count] = L'\0';
+}
+
+static NOTIFYICONDATAW notificationIconData(Host *host) {
+    NOTIFYICONDATAW data = {};
+    data.cbSize = sizeof(data);
+    data.hWnd = parentWindow(host);
+    data.uID = 1;
+    return data;
+}
+
+static bool ensureNotificationIcon(Host *host) {
+    if (!host) return false;
+    if (host->notification_icon_added) return true;
+    NOTIFYICONDATAW data = notificationIconData(host);
+    if (!data.hWnd) return false;
+    data.uFlags = NIF_MESSAGE | NIF_ICON | NIF_TIP;
+    data.uCallbackMessage = WM_APP + 42;
+    data.hIcon = LoadIconW(nullptr, MAKEINTRESOURCEW(32512));
+    std::wstring tip = widen(host->app_name.empty() ? std::string("zero-native") : host->app_name);
+    copyWideField(data.szTip, ARRAYSIZE(data.szTip), tip);
+    if (!Shell_NotifyIconW(NIM_ADD, &data)) return false;
+    data.uVersion = NOTIFYICON_VERSION_4;
+    Shell_NotifyIconW(NIM_SETVERSION, &data);
+    host->notification_icon_added = true;
+    return true;
+}
+
+static void removeNotificationIcon(Host *host) {
+    if (!host || !host->notification_icon_added) return;
+    NOTIFYICONDATAW data = notificationIconData(host);
+    if (data.hWnd) Shell_NotifyIconW(NIM_DELETE, &data);
+    host->notification_icon_added = false;
 }
 
 static bool initializeCom(bool *uninitialize) {
@@ -1229,6 +1269,7 @@ void zero_native_windows_destroy(Host *host) {
     std::shared_ptr<HostLifetime> lifetime = host->lifetime;
     std::lock_guard<std::recursive_mutex> guard(lifetime->mutex);
     lifetime->alive = false;
+    removeNotificationIcon(host);
     destroyAllWindows(host);
     delete host;
 }
@@ -1699,6 +1740,26 @@ int zero_native_windows_show_message_dialog(Host *host, const WindowsMessageDial
     if (pressed == 101) return 1;
     if (pressed == 102) return 2;
     return 0;
+}
+
+int zero_native_windows_show_notification(Host *host, const char *title, size_t title_len, const char *subtitle, size_t subtitle_len, const char *body, size_t body_len) {
+    if (!host || !title || title_len == 0) return 0;
+    if ((subtitle_len > 0 && !subtitle) || (body_len > 0 && !body)) return 0;
+    if (!ensureNotificationIcon(host)) return 0;
+
+    std::wstring title_wide = widen(slice(title, title_len));
+    std::wstring body_wide;
+    if (subtitle && subtitle_len > 0) body_wide += widen(slice(subtitle, subtitle_len));
+    if (subtitle_len > 0 && body_len > 0) body_wide += L"\n";
+    if (body && body_len > 0) body_wide += widen(slice(body, body_len));
+
+    NOTIFYICONDATAW data = notificationIconData(host);
+    if (!data.hWnd) return 0;
+    data.uFlags = NIF_INFO;
+    data.dwInfoFlags = NIIF_INFO;
+    copyWideField(data.szInfoTitle, ARRAYSIZE(data.szInfoTitle), title_wide);
+    copyWideField(data.szInfo, ARRAYSIZE(data.szInfo), body_wide);
+    return Shell_NotifyIconW(NIM_MODIFY, &data) ? 1 : 0;
 }
 
 int zero_native_windows_open_external_url(Host *host, const char *url, size_t url_len) {
