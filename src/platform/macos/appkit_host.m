@@ -546,6 +546,8 @@ static NSMutableDictionary *ZeroNativeCredentialQuery(NSString *service, NSStrin
         case ZERO_NATIVE_APPKIT_VIEW_TITLEBAR_ACCESSORY:
         case ZERO_NATIVE_APPKIT_VIEW_STATUSBAR:
         case ZERO_NATIVE_APPKIT_VIEW_SIDEBAR:
+        case ZERO_NATIVE_APPKIT_VIEW_SPLIT:
+        case ZERO_NATIVE_APPKIT_VIEW_STACK:
         case ZERO_NATIVE_APPKIT_VIEW_SPACER: {
             view = [[NSView alloc] initWithFrame:NSZeroRect];
             view.wantsLayer = YES;

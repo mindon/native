@@ -925,6 +925,8 @@ static bool isNativeContainerKind(int kind) {
         kind == kViewTitlebarAccessory ||
         kind == kViewSidebar ||
         kind == kViewStatusbar ||
+        kind == kViewSplit ||
+        kind == kViewStack ||
         kind == kViewSpacer;
 }
 
@@ -1820,6 +1822,8 @@ int zero_native_windows_create_view(Host *host, uint64_t window_id, const char *
         case kViewTitlebarAccessory:
         case kViewSidebar:
         case kViewStatusbar:
+        case kViewSplit:
+        case kViewStack:
         case kViewSpacer:
             class_name = L"STATIC";
             style |= WS_CLIPCHILDREN | SS_GRAYRECT;

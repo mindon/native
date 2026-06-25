@@ -271,6 +271,8 @@ static int zero_native_is_native_container_kind(int kind) {
         kind == ZERO_NATIVE_GTK_VIEW_TITLEBAR_ACCESSORY ||
         kind == ZERO_NATIVE_GTK_VIEW_SIDEBAR ||
         kind == ZERO_NATIVE_GTK_VIEW_STATUSBAR ||
+        kind == ZERO_NATIVE_GTK_VIEW_SPLIT ||
+        kind == ZERO_NATIVE_GTK_VIEW_STACK ||
         kind == ZERO_NATIVE_GTK_VIEW_SPACER;
 }
 
@@ -307,6 +309,8 @@ static GtkWidget *zero_native_make_native_widget(int kind, const char *label, co
         case ZERO_NATIVE_GTK_VIEW_TITLEBAR_ACCESSORY:
         case ZERO_NATIVE_GTK_VIEW_SIDEBAR:
         case ZERO_NATIVE_GTK_VIEW_STATUSBAR:
+        case ZERO_NATIVE_GTK_VIEW_SPLIT:
+        case ZERO_NATIVE_GTK_VIEW_STACK:
         case ZERO_NATIVE_GTK_VIEW_SPACER:
             return gtk_fixed_new();
         case ZERO_NATIVE_GTK_VIEW_BUTTON:

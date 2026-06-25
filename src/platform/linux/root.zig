@@ -883,6 +883,8 @@ fn isSupportedNativeViewKind(kind: platform_mod.ViewKind) bool {
         .titlebar_accessory,
         .sidebar,
         .statusbar,
+        .split,
+        .stack,
         .button,
         .checkbox,
         .toggle,
@@ -893,11 +895,15 @@ fn isSupportedNativeViewKind(kind: platform_mod.ViewKind) bool {
         .progress_indicator,
         => true,
         .webview,
-        .split,
-        .stack,
         .gpu_surface,
         => false,
     };
+}
+
+test "linux supports split and stack native containers" {
+    try std.testing.expect(isSupportedNativeViewKind(.split));
+    try std.testing.expect(isSupportedNativeViewKind(.stack));
+    try std.testing.expect(!isSupportedNativeViewKind(.gpu_surface));
 }
 
 fn viewKindInt(kind: platform_mod.ViewKind) c_int {
