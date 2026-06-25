@@ -3,6 +3,7 @@ const runtime = @import("../runtime/root.zig");
 const platform = @import("../platform/root.zig");
 
 const max_mobile_command_name_bytes: usize = 128;
+const max_mobile_asset_root_bytes: usize = platform.max_webview_url_bytes;
 
 pub const EmbeddedApp = struct {
     app: runtime.App,
@@ -56,6 +57,8 @@ const MobileHostApp = struct {
     activation_count: usize = 0,
     deactivation_count: usize = 0,
     command_count: usize = 0,
+    asset_root: [max_mobile_asset_root_bytes]u8 = undefined,
+    asset_root_len: usize = 0,
     last_command_name: [max_mobile_command_name_bytes + 1]u8 = [_]u8{0} ** (max_mobile_command_name_bytes + 1),
 
     fn create() !*MobileHostApp {
@@ -66,14 +69,28 @@ const MobileHostApp = struct {
         self.activation_count = 0;
         self.deactivation_count = 0;
         self.command_count = 0;
+        self.asset_root = undefined;
+        self.asset_root_len = 0;
         self.last_command_name = [_]u8{0} ** (max_mobile_command_name_bytes + 1);
         self.embedded = EmbeddedApp.init(.{
             .context = self,
             .name = "zero-native-mobile",
-            .source = platform.WebViewSource.html(mobile_html),
+            .source_fn = mobileSource,
             .event_fn = handleEvent,
         }, self.null_platform.platform());
         return self;
+    }
+
+    fn source(self: *MobileHostApp) platform.WebViewSource {
+        if (self.asset_root_len > 0) {
+            return platform.WebViewSource.assets(.{
+                .root_path = self.asset_root[0..self.asset_root_len],
+                .entry = "index.html",
+                .origin = "zero://app",
+                .spa_fallback = true,
+            });
+        }
+        return platform.WebViewSource.html(mobile_html);
     }
 
     fn handleEvent(context: *anyopaque, runtime_value: *runtime.Runtime, event: runtime.Event) anyerror!void {
@@ -95,6 +112,11 @@ const MobileHostApp = struct {
         }
     }
 };
+
+fn mobileSource(context: *anyopaque) anyerror!platform.WebViewSource {
+    const self: *MobileHostApp = @ptrCast(@alignCast(context));
+    return self.source();
+}
 
 const mobile_html =
     \\<!doctype html>
@@ -182,9 +204,19 @@ pub fn zero_native_app_frame(app: ?*anyopaque) void {
 }
 
 pub fn zero_native_app_set_asset_root(app: ?*anyopaque, path: [*]const u8, len: usize) void {
-    _ = app;
-    _ = path;
-    _ = len;
+    const self = mobileApp(app) orelse return;
+    if (len > self.asset_root.len) {
+        recordError(self, error.WindowSourceTooLarge);
+        return;
+    }
+    if (len == 0) {
+        self.asset_root_len = 0;
+        self.last_error = null;
+        return;
+    }
+    @memcpy(self.asset_root[0..len], path[0..len]);
+    self.asset_root_len = len;
+    self.last_error = null;
 }
 
 pub fn zero_native_app_last_command_count(app: ?*anyopaque) usize {
@@ -214,6 +246,41 @@ test "embedded app starts and loads source" {
 
     try embedded.start();
     try @import("std").testing.expectEqualStrings("<p>Embedded</p>", null_platform.loaded_source.?.bytes);
+}
+
+test "mobile C ABI can load packaged asset source" {
+    const app = zero_native_app_create() orelse return error.TestUnexpectedResult;
+    defer zero_native_app_destroy(app);
+
+    const asset_root = "/tmp/zero-native-mobile-assets";
+    zero_native_app_set_asset_root(app, asset_root, asset_root.len);
+    zero_native_app_start(app);
+
+    const self = mobileApp(app).?;
+    const source = self.null_platform.loaded_source.?;
+    try std.testing.expectEqual(platform.WebViewSourceKind.assets, source.kind);
+    try std.testing.expectEqualStrings("zero://app", source.bytes);
+    try std.testing.expect(source.asset_options != null);
+    try std.testing.expectEqualStrings(asset_root, source.asset_options.?.root_path);
+    try std.testing.expectEqualStrings("index.html", source.asset_options.?.entry);
+    try std.testing.expect(source.asset_options.?.spa_fallback);
+    try std.testing.expectEqualStrings("", std.mem.span(zero_native_app_last_error_name(app)));
+}
+
+test "mobile C ABI can reset asset root before startup" {
+    const app = zero_native_app_create() orelse return error.TestUnexpectedResult;
+    defer zero_native_app_destroy(app);
+
+    const asset_root = "/tmp/zero-native-mobile-assets";
+    zero_native_app_set_asset_root(app, asset_root, asset_root.len);
+    zero_native_app_set_asset_root(app, asset_root, 0);
+    zero_native_app_start(app);
+
+    const self = mobileApp(app).?;
+    const source = self.null_platform.loaded_source.?;
+    try std.testing.expectEqual(platform.WebViewSourceKind.html, source.kind);
+    try std.testing.expectEqualStrings(mobile_html, source.bytes);
+    try std.testing.expectEqualStrings("", std.mem.span(zero_native_app_last_error_name(app)));
 }
 
 test "mobile C ABI forwards activation lifecycle through embedded runtime" {
