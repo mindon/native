@@ -30,6 +30,13 @@ zero-native capabilities are native OS services and app events exposed through `
       <td>macOS, Linux, and Windows system WebView; macOS Chromium</td>
     </tr>
     <tr>
+      <td>Native dialogs</td>
+      <td><code>PlatformServices.showOpenDialog(...)</code> / <code>showSaveDialog(...)</code> / <code>showMessageDialog(...)</code></td>
+      <td><code>zero-native.dialog.openFile</code> / <code>saveFile</code> / <code>showMessage</code></td>
+      <td><code>dialog</code></td>
+      <td>macOS system WebView and Chromium; Linux and Windows system WebView</td>
+    </tr>
+    <tr>
       <td>Reveal path in file manager</td>
       <td><code>runtime.revealPath(path)</code></td>
       <td><code>zero-native.os.revealPath</code></td>
@@ -93,6 +100,9 @@ OS bridge commands are default-deny. Add explicit `builtin_bridge` entries for e
     .commands = &.{
         .{ .name = "zero-native.os.openUrl", .permissions = .{ "network" }, .origins = .{ "zero://app" } },
         .{ .name = "zero-native.os.showNotification", .permissions = .{ "notifications" }, .origins = .{ "zero://app" } },
+        .{ .name = "zero-native.dialog.openFile", .permissions = .{ "dialog" }, .origins = .{ "zero://app" } },
+        .{ .name = "zero-native.dialog.saveFile", .permissions = .{ "dialog" }, .origins = .{ "zero://app" } },
+        .{ .name = "zero-native.dialog.showMessage", .permissions = .{ "dialog" }, .origins = .{ "zero://app" } },
         .{ .name = "zero-native.os.revealPath", .permissions = .{ "filesystem" }, .origins = .{ "zero://app" } },
         .{ .name = "zero-native.os.addRecentDocument", .permissions = .{ "filesystem" }, .origins = .{ "zero://app" } },
         .{ .name = "zero-native.os.clearRecentDocuments", .permissions = .{ "filesystem" }, .origins = .{ "zero://app" } },

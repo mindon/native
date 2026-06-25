@@ -143,7 +143,7 @@ const filters = [_]zero_native.FileFilter{
 
 ## From JavaScript
 
-Dialogs require the [builtin bridge](/bridge/builtin-commands) to be enabled with an explicit policy. JSON field names use camelCase:
+Dialogs require the [builtin bridge](/bridge/builtin-commands) to be enabled with an explicit policy that grants the `dialog` permission. JSON field names use camelCase:
 
 ```javascript
 const files = await window.zero.invoke("zero-native.dialog.openFile", {
