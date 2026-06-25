@@ -92,6 +92,9 @@ extern fn zero_native_windows_set_webview_layer(host: *WindowsHost, window_id: u
 extern fn zero_native_windows_close_webview(host: *WindowsHost, window_id: u64, label: [*]const u8, label_len: usize) c_int;
 extern fn zero_native_windows_open_external_url(host: *WindowsHost, url: [*]const u8, url_len: usize) c_int;
 extern fn zero_native_windows_reveal_path(host: *WindowsHost, path: [*]const u8, path_len: usize) c_int;
+extern fn zero_native_windows_show_open_dialog(host: *WindowsHost, opts: *const WindowsOpenDialogOpts, buffer: [*]u8, buffer_len: usize) WindowsOpenDialogResult;
+extern fn zero_native_windows_show_save_dialog(host: *WindowsHost, opts: *const WindowsSaveDialogOpts, buffer: [*]u8, buffer_len: usize) usize;
+extern fn zero_native_windows_show_message_dialog(host: *WindowsHost, opts: *const WindowsMessageDialogOpts) c_int;
 extern fn zero_native_windows_add_recent_document(host: *WindowsHost, path: [*]const u8, path_len: usize) c_int;
 extern fn zero_native_windows_clear_recent_documents(host: *WindowsHost) c_int;
 extern fn zero_native_windows_set_credential(host: *WindowsHost, service: [*]const u8, service_len: usize, account: [*]const u8, account_len: usize, secret: [*]const u8, secret_len: usize) c_int;
@@ -99,6 +102,49 @@ extern fn zero_native_windows_get_credential(host: *WindowsHost, service: [*]con
 extern fn zero_native_windows_delete_credential(host: *WindowsHost, service: [*]const u8, service_len: usize, account: [*]const u8, account_len: usize) c_int;
 extern fn zero_native_windows_clipboard_read(host: *WindowsHost, buffer: [*]u8, buffer_len: usize) usize;
 extern fn zero_native_windows_clipboard_write(host: *WindowsHost, text: [*]const u8, text_len: usize) void;
+
+const WindowsOpenDialogOpts = extern struct {
+    title: [*]const u8,
+    title_len: usize,
+    default_path: [*]const u8,
+    default_path_len: usize,
+    extensions: [*]const u8,
+    extensions_len: usize,
+    allow_directories: c_int,
+    allow_multiple: c_int,
+};
+
+const WindowsOpenDialogResult = extern struct {
+    count: usize,
+    bytes_written: usize,
+};
+
+const WindowsSaveDialogOpts = extern struct {
+    title: [*]const u8,
+    title_len: usize,
+    default_path: [*]const u8,
+    default_path_len: usize,
+    default_name: [*]const u8,
+    default_name_len: usize,
+    extensions: [*]const u8,
+    extensions_len: usize,
+};
+
+const WindowsMessageDialogOpts = extern struct {
+    style: c_int,
+    title: [*]const u8,
+    title_len: usize,
+    message: [*]const u8,
+    message_len: usize,
+    informative_text: [*]const u8,
+    informative_text_len: usize,
+    primary_button: [*]const u8,
+    primary_button_len: usize,
+    secondary_button: [*]const u8,
+    secondary_button_len: usize,
+    tertiary_button: [*]const u8,
+    tertiary_button_len: usize,
+};
 
 pub const WindowsPlatform = struct {
     host: *WindowsHost,
@@ -166,6 +212,9 @@ pub const WindowsPlatform = struct {
                 .set_webview_zoom_fn = setWebViewZoom,
                 .set_webview_layer_fn = setWebViewLayer,
                 .close_webview_fn = closeWebView,
+                .show_open_dialog_fn = showOpenDialog,
+                .show_save_dialog_fn = showSaveDialog,
+                .show_message_dialog_fn = showMessageDialog,
                 .open_external_url_fn = openExternalUrl,
                 .reveal_path_fn = revealPath,
                 .add_recent_document_fn = addRecentDocument,
@@ -492,6 +541,66 @@ fn closeWebView(context: ?*anyopaque, window_id: platform_mod.WindowId, label: [
     if (zero_native_windows_close_webview(self.host, window_id, label.ptr, label.len) == 0) return error.WebViewNotFound;
 }
 
+fn showOpenDialog(context: ?*anyopaque, options: platform_mod.OpenDialogOptions, buffer: []u8) anyerror!platform_mod.OpenDialogResult {
+    const self: *WindowsPlatform = @ptrCast(@alignCast(context.?));
+    if (self.web_engine != .system) return error.UnsupportedService;
+    var ext_buf: [1024]u8 = undefined;
+    const ext_str = flattenFilters(options.filters, &ext_buf);
+    const opts = WindowsOpenDialogOpts{
+        .title = options.title.ptr,
+        .title_len = options.title.len,
+        .default_path = options.default_path.ptr,
+        .default_path_len = options.default_path.len,
+        .extensions = ext_str.ptr,
+        .extensions_len = ext_str.len,
+        .allow_directories = if (options.allow_directories) 1 else 0,
+        .allow_multiple = if (options.allow_multiple) 1 else 0,
+    };
+    const result = zero_native_windows_show_open_dialog(self.host, &opts, buffer.ptr, buffer.len);
+    return .{ .count = result.count, .paths = buffer[0..result.bytes_written] };
+}
+
+fn showSaveDialog(context: ?*anyopaque, options: platform_mod.SaveDialogOptions, buffer: []u8) anyerror!?[]const u8 {
+    const self: *WindowsPlatform = @ptrCast(@alignCast(context.?));
+    if (self.web_engine != .system) return error.UnsupportedService;
+    var ext_buf: [1024]u8 = undefined;
+    const ext_str = flattenFilters(options.filters, &ext_buf);
+    const opts = WindowsSaveDialogOpts{
+        .title = options.title.ptr,
+        .title_len = options.title.len,
+        .default_path = options.default_path.ptr,
+        .default_path_len = options.default_path.len,
+        .default_name = options.default_name.ptr,
+        .default_name_len = options.default_name.len,
+        .extensions = ext_str.ptr,
+        .extensions_len = ext_str.len,
+    };
+    const written = zero_native_windows_show_save_dialog(self.host, &opts, buffer.ptr, buffer.len);
+    if (written == 0) return null;
+    return buffer[0..written];
+}
+
+fn showMessageDialog(context: ?*anyopaque, options: platform_mod.MessageDialogOptions) anyerror!platform_mod.MessageDialogResult {
+    const self: *WindowsPlatform = @ptrCast(@alignCast(context.?));
+    if (self.web_engine != .system) return error.UnsupportedService;
+    const opts = WindowsMessageDialogOpts{
+        .style = @intFromEnum(options.style),
+        .title = options.title.ptr,
+        .title_len = options.title.len,
+        .message = options.message.ptr,
+        .message_len = options.message.len,
+        .informative_text = options.informative_text.ptr,
+        .informative_text_len = options.informative_text.len,
+        .primary_button = options.primary_button.ptr,
+        .primary_button_len = options.primary_button.len,
+        .secondary_button = options.secondary_button.ptr,
+        .secondary_button_len = options.secondary_button.len,
+        .tertiary_button = options.tertiary_button.ptr,
+        .tertiary_button_len = options.tertiary_button.len,
+    };
+    return @enumFromInt(zero_native_windows_show_message_dialog(self.host, &opts));
+}
+
 fn openExternalUrl(context: ?*anyopaque, url: []const u8) anyerror!void {
     const self: *WindowsPlatform = @ptrCast(@alignCast(context.?));
     if (self.web_engine != .system) return error.UnsupportedService;
@@ -656,6 +765,24 @@ fn viewKindInt(kind: platform_mod.ViewKind) c_int {
         .toggle => 14,
         .progress_indicator => 15,
     };
+}
+
+fn flattenFilters(filters: []const platform_mod.FileFilter, buffer: []u8) []const u8 {
+    var offset: usize = 0;
+    for (filters) |filter| {
+        for (filter.extensions) |ext| {
+            if (offset > 0 and offset < buffer.len) {
+                buffer[offset] = ';';
+                offset += 1;
+            }
+            const end = @min(offset + ext.len, buffer.len);
+            if (end > offset) {
+                @memcpy(buffer[offset..end], ext[0..(end - offset)]);
+                offset = end;
+            }
+        }
+    }
+    return buffer[0..offset];
 }
 
 test "windows platform module exports type" {

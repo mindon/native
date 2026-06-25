@@ -1,6 +1,7 @@
 #include <windows.h>
 #include <shellapi.h>
 #include <shlobj.h>
+#include <shobjidl.h>
 #include <wincred.h>
 #include <objbase.h>
 #include <commctrl.h>
@@ -91,6 +92,49 @@ struct WindowsEvent {
     size_t view_label_len;
     const char *drop_paths;
     size_t drop_paths_len;
+};
+
+struct WindowsOpenDialogOpts {
+    const char *title;
+    size_t title_len;
+    const char *default_path;
+    size_t default_path_len;
+    const char *extensions;
+    size_t extensions_len;
+    int allow_directories;
+    int allow_multiple;
+};
+
+struct WindowsOpenDialogResult {
+    size_t count;
+    size_t bytes_written;
+};
+
+struct WindowsSaveDialogOpts {
+    const char *title;
+    size_t title_len;
+    const char *default_path;
+    size_t default_path_len;
+    const char *default_name;
+    size_t default_name_len;
+    const char *extensions;
+    size_t extensions_len;
+};
+
+struct WindowsMessageDialogOpts {
+    int style;
+    const char *title;
+    size_t title_len;
+    const char *message;
+    size_t message_len;
+    const char *informative_text;
+    size_t informative_text_len;
+    const char *primary_button;
+    size_t primary_button_len;
+    const char *secondary_button;
+    size_t secondary_button_len;
+    const char *tertiary_button;
+    size_t tertiary_button_len;
 };
 
 using EventCallback = void (*)(void *, const WindowsEvent *);
@@ -234,6 +278,93 @@ static std::string narrow(const std::wstring &value) {
     std::string out((size_t)count, '\0');
     WideCharToMultiByte(CP_UTF8, 0, value.data(), (int)value.size(), out.data(), count, nullptr, nullptr);
     return out;
+}
+
+static HWND parentWindow(Host *host) {
+    if (!host) return nullptr;
+    for (auto &entry : host->windows) {
+        if (entry.second.hwnd) return entry.second.hwnd;
+    }
+    return nullptr;
+}
+
+static bool initializeCom(bool *uninitialize) {
+    *uninitialize = false;
+    HRESULT hr = CoInitializeEx(nullptr, COINIT_APARTMENTTHREADED | COINIT_DISABLE_OLE1DDE);
+    if (SUCCEEDED(hr)) {
+        *uninitialize = true;
+        return true;
+    }
+    return false;
+}
+
+static void finishCom(bool uninitialize) {
+    if (uninitialize) CoUninitialize();
+}
+
+static void setDialogTitle(IFileDialog *dialog, const char *title, size_t title_len) {
+    if (!dialog || !title || title_len == 0) return;
+    std::wstring title_wide = widen(slice(title, title_len));
+    if (!title_wide.empty()) dialog->SetTitle(title_wide.c_str());
+}
+
+static void setDialogFolder(IFileDialog *dialog, const char *path, size_t path_len) {
+    if (!dialog || !path || path_len == 0) return;
+    std::wstring path_wide = widen(slice(path, path_len));
+    if (path_wide.empty()) return;
+    IShellItem *folder = nullptr;
+    if (SUCCEEDED(SHCreateItemFromParsingName(path_wide.c_str(), nullptr, IID_PPV_ARGS(&folder))) && folder) {
+        dialog->SetFolder(folder);
+        folder->Release();
+    }
+}
+
+static std::wstring fileDialogPattern(const char *extensions, size_t extensions_len) {
+    std::string flat = slice(extensions, extensions_len);
+    std::wstring pattern;
+    size_t start = 0;
+    while (start < flat.size()) {
+        size_t end = flat.find(';', start);
+        if (end == std::string::npos) end = flat.size();
+        std::string ext = flat.substr(start, end - start);
+        while (!ext.empty() && (ext.front() == ' ' || ext.front() == '\t')) ext.erase(ext.begin());
+        while (!ext.empty() && (ext.back() == ' ' || ext.back() == '\t' || ext.back() == '\r')) ext.pop_back();
+        if (!ext.empty()) {
+            if (!pattern.empty()) pattern += L";";
+            if (ext.find('*') != std::string::npos) {
+                pattern += widen(ext);
+            } else if (!ext.empty() && ext.front() == '.') {
+                pattern += L"*" + widen(ext);
+            } else {
+                pattern += L"*." + widen(ext);
+            }
+        }
+        start = end + 1;
+    }
+    return pattern;
+}
+
+static void setDialogFilters(IFileDialog *dialog, const char *extensions, size_t extensions_len) {
+    std::wstring pattern = fileDialogPattern(extensions, extensions_len);
+    if (!dialog || pattern.empty()) return;
+    COMDLG_FILTERSPEC specs[2] = {
+        { L"Matching files", pattern.c_str() },
+        { L"All files", L"*.*" },
+    };
+    dialog->SetFileTypes(2, specs);
+    dialog->SetFileTypeIndex(1);
+}
+
+static bool appendPathToBuffer(char *buffer, size_t buffer_len, size_t *offset, size_t *count, const std::wstring &path_wide) {
+    std::string path = narrow(path_wide);
+    if (path.empty()) return false;
+    size_t needed = path.size() + (*count > 0 ? 1 : 0);
+    if (*offset + needed > buffer_len) return false;
+    if (*count > 0) buffer[(*offset)++] = '\n';
+    memcpy(buffer + *offset, path.data(), path.size());
+    *offset += path.size();
+    *count += 1;
+    return true;
 }
 
 static std::vector<std::string> parseNewlineList(const char *bytes, size_t len) {
@@ -1438,6 +1569,136 @@ int zero_native_windows_close_view(Host *host, uint64_t window_id, const char *l
     destroyNativeViewAndChildren(host, key);
     reorderWindowChildren(host, window_id);
     return 1;
+}
+
+WindowsOpenDialogResult zero_native_windows_show_open_dialog(Host *host, const WindowsOpenDialogOpts *opts, char *buffer, size_t buffer_len) {
+    WindowsOpenDialogResult result = {};
+    if (!host || !opts || !buffer || buffer_len == 0) return result;
+    bool uninitialize = false;
+    if (!initializeCom(&uninitialize)) return result;
+
+    IFileOpenDialog *dialog = nullptr;
+    HRESULT hr = CoCreateInstance(CLSID_FileOpenDialog, nullptr, CLSCTX_INPROC_SERVER, IID_PPV_ARGS(&dialog));
+    if (FAILED(hr) || !dialog) {
+        finishCom(uninitialize);
+        return result;
+    }
+
+    DWORD options = 0;
+    if (SUCCEEDED(dialog->GetOptions(&options))) {
+        options |= FOS_FORCEFILESYSTEM | FOS_PATHMUSTEXIST;
+        if (opts->allow_directories) options |= FOS_PICKFOLDERS;
+        else options |= FOS_FILEMUSTEXIST;
+        if (opts->allow_multiple) options |= FOS_ALLOWMULTISELECT;
+        dialog->SetOptions(options);
+    }
+    setDialogTitle(dialog, opts->title, opts->title_len);
+    setDialogFolder(dialog, opts->default_path, opts->default_path_len);
+    if (!opts->allow_directories) setDialogFilters(dialog, opts->extensions, opts->extensions_len);
+
+    if (SUCCEEDED(dialog->Show(parentWindow(host)))) {
+        IShellItemArray *items = nullptr;
+        if (SUCCEEDED(dialog->GetResults(&items)) && items) {
+            DWORD count = 0;
+            items->GetCount(&count);
+            size_t offset = 0;
+            size_t written_count = 0;
+            for (DWORD index = 0; index < count; ++index) {
+                IShellItem *item = nullptr;
+                if (SUCCEEDED(items->GetItemAt(index, &item)) && item) {
+                    PWSTR path = nullptr;
+                    if (SUCCEEDED(item->GetDisplayName(SIGDN_FILESYSPATH, &path)) && path) {
+                        appendPathToBuffer(buffer, buffer_len, &offset, &written_count, std::wstring(path));
+                        CoTaskMemFree(path);
+                    }
+                    item->Release();
+                }
+            }
+            result.count = written_count;
+            result.bytes_written = offset;
+            items->Release();
+        }
+    }
+
+    dialog->Release();
+    finishCom(uninitialize);
+    return result;
+}
+
+size_t zero_native_windows_show_save_dialog(Host *host, const WindowsSaveDialogOpts *opts, char *buffer, size_t buffer_len) {
+    if (!host || !opts || !buffer || buffer_len == 0) return 0;
+    bool uninitialize = false;
+    if (!initializeCom(&uninitialize)) return 0;
+
+    IFileSaveDialog *dialog = nullptr;
+    HRESULT hr = CoCreateInstance(CLSID_FileSaveDialog, nullptr, CLSCTX_INPROC_SERVER, IID_PPV_ARGS(&dialog));
+    if (FAILED(hr) || !dialog) {
+        finishCom(uninitialize);
+        return 0;
+    }
+
+    DWORD options = 0;
+    if (SUCCEEDED(dialog->GetOptions(&options))) dialog->SetOptions(options | FOS_FORCEFILESYSTEM | FOS_PATHMUSTEXIST);
+    setDialogTitle(dialog, opts->title, opts->title_len);
+    setDialogFolder(dialog, opts->default_path, opts->default_path_len);
+    setDialogFilters(dialog, opts->extensions, opts->extensions_len);
+    std::wstring default_name = widen(slice(opts->default_name, opts->default_name_len));
+    if (!default_name.empty()) dialog->SetFileName(default_name.c_str());
+
+    size_t written = 0;
+    if (SUCCEEDED(dialog->Show(parentWindow(host)))) {
+        IShellItem *item = nullptr;
+        if (SUCCEEDED(dialog->GetResult(&item)) && item) {
+            PWSTR path = nullptr;
+            if (SUCCEEDED(item->GetDisplayName(SIGDN_FILESYSPATH, &path)) && path) {
+                std::string utf8_path = narrow(std::wstring(path));
+                written = utf8_path.size() < buffer_len ? utf8_path.size() : buffer_len;
+                if (written > 0) memcpy(buffer, utf8_path.data(), written);
+                CoTaskMemFree(path);
+            }
+            item->Release();
+        }
+    }
+
+    dialog->Release();
+    finishCom(uninitialize);
+    return written;
+}
+
+int zero_native_windows_show_message_dialog(Host *host, const WindowsMessageDialogOpts *opts) {
+    if (!host || !opts) return 0;
+    std::wstring title = widen(slice(opts->title, opts->title_len));
+    std::wstring message = widen(slice(opts->message, opts->message_len));
+    std::wstring informative = widen(slice(opts->informative_text, opts->informative_text_len));
+    std::wstring primary = widen(slice(opts->primary_button, opts->primary_button_len));
+    std::wstring secondary = widen(slice(opts->secondary_button, opts->secondary_button_len));
+    std::wstring tertiary = widen(slice(opts->tertiary_button, opts->tertiary_button_len));
+    if (primary.empty()) primary = L"OK";
+
+    TASKDIALOG_BUTTON buttons[3] = {};
+    int button_count = 0;
+    buttons[button_count++] = { 100, primary.c_str() };
+    if (!secondary.empty()) buttons[button_count++] = { 101, secondary.c_str() };
+    if (!tertiary.empty()) buttons[button_count++] = { 102, tertiary.c_str() };
+
+    TASKDIALOGCONFIG config = {};
+    config.cbSize = sizeof(config);
+    config.hwndParent = parentWindow(host);
+    config.dwFlags = TDF_ALLOW_DIALOG_CANCELLATION;
+    config.pszWindowTitle = title.empty() ? L"zero-native" : title.c_str();
+    config.pszMainInstruction = message.empty() ? config.pszWindowTitle : message.c_str();
+    config.pszContent = informative.empty() ? nullptr : informative.c_str();
+    config.cButtons = static_cast<UINT>(button_count);
+    config.pButtons = buttons;
+    config.nDefaultButton = 100;
+    config.pszMainIcon = opts->style == 2 ? TD_ERROR_ICON : (opts->style == 1 ? TD_WARNING_ICON : TD_INFORMATION_ICON);
+
+    int pressed = 100;
+    HRESULT hr = TaskDialogIndirect(&config, &pressed, nullptr, nullptr);
+    if (FAILED(hr)) return 0;
+    if (pressed == 101) return 1;
+    if (pressed == 102) return 2;
+    return 0;
 }
 
 int zero_native_windows_open_external_url(Host *host, const char *url, size_t url_len) {
