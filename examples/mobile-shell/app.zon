@@ -1,0 +1,10 @@
+.{
+    .id = "dev.zero_native.mobile_shell",
+    .name = "mobile-shell",
+    .display_name = "Mobile Shell",
+    .version = "0.1.0",
+    .platforms = .{ "ios", "android" },
+    .permissions = .{},
+    .capabilities = .{ "webview", "native_module" },
+    .web_engine = "system",
+}

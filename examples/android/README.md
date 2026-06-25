@@ -1,6 +1,6 @@
 # Android Example
 
-A minimal Android host app that embeds a zero-native static library through JNI.
+A minimal Android mobile shell that embeds a zero-native static library through JNI. The example keeps a native Android header above a WebView workspace.
 
 ## Build the native library
 
@@ -30,7 +30,7 @@ Install on an emulator or device:
 
 ## Files
 
-- `app/src/main/java/dev/zero_native/examples/android/MainActivity.kt` hosts a `SurfaceView` and calls the JNI bridge.
+- `app/src/main/java/dev/zero_native/examples/android/MainActivity.kt` hosts native Android chrome, a WebView workspace, a `SurfaceView`, and the JNI bridge.
 - `app/src/main/cpp/zero_native_jni.c` forwards JNI calls to the zero-native C ABI.
 - `app/src/main/cpp/CMakeLists.txt` imports `libzero-native.a` and builds the JNI shared library.
 - `app.zon` records the mobile example metadata for zero-native tooling.

@@ -1,6 +1,6 @@
 # iOS Example
 
-A minimal iOS host app that embeds a zero-native static library from Swift.
+A minimal iOS mobile shell that embeds a zero-native static library from Swift. The example keeps a native UIKit header above a WKWebView workspace.
 
 ## Build the native library
 
@@ -26,6 +26,6 @@ Select a simulator or device and run the `ZeroNativeIOSExample` scheme.
 
 ## Files
 
-- `ZeroNativeIOSExample/ZeroNativeHostViewController.swift` hosts a `WKWebView` and calls the zero-native C ABI.
+- `ZeroNativeIOSExample/ZeroNativeHostViewController.swift` hosts native UIKit chrome, a `WKWebView` workspace, and the zero-native C ABI.
 - `ZeroNativeIOSExample/zero_native.h` declares the C ABI expected from `libzero-native.a`.
 - `app.zon` records the mobile example metadata for zero-native tooling.
