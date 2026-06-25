@@ -44,11 +44,13 @@ pub fn writeText(input: Input, writer: anytype) !void {
     }
     for (input.views) |view| {
         try writer.print(
-            "  view @w{d}/{s} kind={s} bounds=({d},{d} {d}x{d}) layer={d} visible={any} enabled={any} open={any}\n",
+            "  view @w{d}/{s} kind={s} role=\"{s}\" text=\"{s}\" bounds=({d},{d} {d}x{d}) layer={d} visible={any} enabled={any} open={any}\n",
             .{
                 view.window_id,
                 view.label,
                 @tagName(view.kind),
+                view.role,
+                view.text,
                 view.frame.x,
                 view.frame.y,
                 view.frame.width,
@@ -79,11 +81,12 @@ pub fn writeA11yText(input: Input, writer: anytype) !void {
     }
     for (input.views) |view| {
         const role = if (view.role.len > 0) view.role else @tagName(view.kind);
+        const name = if (view.text.len > 0) view.text else view.label;
         try writer.print("@w{d}/{s} role={s} name=\"{s}\" bounds=({d},{d} {d}x{d})\n", .{
             view.window_id,
             view.label,
             role,
-            view.label,
+            name,
             view.frame.x,
             view.frame.y,
             view.frame.width,
@@ -96,7 +99,7 @@ test "snapshot emits window and source" {
     var buffer: [512]u8 = undefined;
     var writer = std.Io.Writer.fixed(&buffer);
     const windows = [_]Window{.{ .title = "Test", .bounds = geometry.RectF.init(0, 0, 100, 100) }};
-    const views = [_]platform.ViewInfo{.{ .label = "main", .kind = .webview, .frame = geometry.RectF.init(0, 0, 100, 100), .role = "webview" }};
+    const views = [_]platform.ViewInfo{.{ .label = "main", .kind = .webview, .frame = geometry.RectF.init(0, 0, 100, 100), .role = "webview", .text = "Main content" }};
     try writeText(.{
         .windows = &windows,
         .views = &views,
@@ -105,5 +108,18 @@ test "snapshot emits window and source" {
     try std.testing.expect(std.mem.indexOf(u8, writer.buffered(), "ready=true") != null);
     try std.testing.expect(std.mem.indexOf(u8, writer.buffered(), "@w1") != null);
     try std.testing.expect(std.mem.indexOf(u8, writer.buffered(), "view @w1/main kind=webview") != null);
+    try std.testing.expect(std.mem.indexOf(u8, writer.buffered(), "text=\"Main content\"") != null);
     try std.testing.expect(std.mem.indexOf(u8, writer.buffered(), "source kind=html") != null);
+}
+
+test "accessibility snapshot uses visible view text as name" {
+    var buffer: [512]u8 = undefined;
+    var writer = std.Io.Writer.fixed(&buffer);
+    const windows = [_]Window{.{ .title = "Test", .bounds = geometry.RectF.init(0, 0, 100, 100) }};
+    const views = [_]platform.ViewInfo{.{ .label = "status", .kind = .statusbar, .frame = geometry.RectF.init(0, 80, 100, 20), .role = "status", .text = "Ready" }};
+    try writeA11yText(.{
+        .windows = &windows,
+        .views = &views,
+    }, &writer);
+    try std.testing.expect(std.mem.indexOf(u8, writer.buffered(), "@w1/status role=status name=\"Ready\"") != null);
 }

@@ -3247,6 +3247,7 @@ test "runtime automation snapshot includes generic views" {
         .kind = .statusbar,
         .frame = geometry.RectF.init(0, 440, 640, 40),
         .role = "status",
+        .text = "Ready",
     });
 
     const snapshot = harness.runtime.automationSnapshot("Snapshot");
@@ -3255,6 +3256,7 @@ test "runtime automation snapshot includes generic views" {
     try std.testing.expectEqual(platform.ViewKind.webview, snapshot.views[0].kind);
     try std.testing.expectEqualStrings("status", snapshot.views[1].label);
     try std.testing.expectEqual(platform.ViewKind.statusbar, snapshot.views[1].kind);
+    try std.testing.expectEqualStrings("Ready", snapshot.views[1].text);
 }
 
 test "runtime configures platform keyboard shortcuts" {
