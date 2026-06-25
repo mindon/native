@@ -255,6 +255,7 @@ fn linkPlatform(b: *std.Build, target: std.Build.ResolvedTarget, app_mod: *std.B
         app_mod.linkSystemLibrary("c", .{});
         app_mod.linkSystemLibrary("c++", .{});
         app_mod.linkSystemLibrary("user32", .{});
+        app_mod.linkSystemLibrary("comctl32", .{});
         app_mod.linkSystemLibrary("ole32", .{});
         app_mod.linkSystemLibrary("shell32", .{});
         if (web_engine == .chromium) app_mod.linkSystemLibrary("libcef", .{});

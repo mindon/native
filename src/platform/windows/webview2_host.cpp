@@ -1,11 +1,13 @@
 #include <windows.h>
 #include <shellapi.h>
 #include <objbase.h>
+#include <commctrl.h>
 
 #include <stdint.h>
 #include <stdlib.h>
 #include <string.h>
 
+#include <algorithm>
 #include <climits>
 #include <map>
 #include <memory>
@@ -32,6 +34,7 @@ enum EventKind {
     kResize = 3,
     kWindowFrame = 4,
     kShortcut = 5,
+    kNativeCommand = 6,
 };
 
 constexpr uint32_t kShortcutModifierPrimary = 1u << 0;
@@ -40,6 +43,23 @@ constexpr uint32_t kShortcutModifierControl = 1u << 2;
 constexpr uint32_t kShortcutModifierOption = 1u << 3;
 constexpr uint32_t kShortcutModifierShift = 1u << 4;
 constexpr size_t kMaxShortcuts = 64;
+
+constexpr int kViewWebView = 0;
+constexpr int kViewToolbar = 1;
+constexpr int kViewTitlebarAccessory = 2;
+constexpr int kViewSidebar = 3;
+constexpr int kViewStatusbar = 4;
+constexpr int kViewSplit = 5;
+constexpr int kViewStack = 6;
+constexpr int kViewButton = 7;
+constexpr int kViewTextField = 8;
+constexpr int kViewSearchField = 9;
+constexpr int kViewLabel = 10;
+constexpr int kViewSpacer = 11;
+constexpr int kViewGpuSurface = 12;
+constexpr int kViewCheckbox = 13;
+constexpr int kViewToggle = 14;
+constexpr int kViewProgressIndicator = 15;
 
 struct WindowsEvent {
     int kind;
@@ -60,6 +80,10 @@ struct WindowsEvent {
     const char *shortcut_key;
     size_t shortcut_key_len;
     uint32_t shortcut_modifiers;
+    const char *command_name;
+    size_t command_name_len;
+    const char *view_label;
+    size_t view_label_len;
 };
 
 using EventCallback = void (*)(void *, const WindowsEvent *);
@@ -96,6 +120,26 @@ struct ChildWebView {
 #endif
 };
 
+struct NativeView {
+    uint64_t window_id = 1;
+    HWND hwnd = nullptr;
+    std::string label;
+    std::string parent;
+    std::string role;
+    std::string text;
+    std::string command;
+    double x = 0;
+    double y = 0;
+    double width = 0;
+    double height = 0;
+    int kind = kViewLabel;
+    int layer = 0;
+    uint64_t creation_order = 0;
+    bool visible = true;
+    bool enabled = true;
+    bool explicit_text = false;
+};
+
 struct Shortcut {
     std::string id;
     std::string key;
@@ -120,7 +164,8 @@ struct Host {
     bool running = false;
     std::map<uint64_t, Window> windows;
     std::map<std::string, ChildWebView> webviews;
-    uint64_t next_webview_order = 1;
+    std::map<std::string, NativeView> native_views;
+    uint64_t next_child_order = 1;
     std::vector<std::string> allowed_origins;
     std::vector<std::string> allowed_external_urls;
     std::vector<Shortcut> shortcuts;
@@ -360,6 +405,10 @@ static std::string webViewKey(uint64_t window_id, const std::string &label) {
     return std::to_string(window_id) + ":" + label;
 }
 
+static std::string nativeViewKey(uint64_t window_id, const std::string &label) {
+    return std::to_string(window_id) + ":" + label;
+}
+
 static int webViewCoord(double value) {
     return value > 0 ? (int)(value + 0.5) : 0;
 }
@@ -370,6 +419,174 @@ static int webViewExtent(double value) {
 
 static bool validChildWebViewFrame(double x, double y, double width, double height) {
     return x >= 0 && y >= 0 && width > 0 && height > 0;
+}
+
+static int nativeViewCoord(double value) {
+    return value > 0 ? (int)(value + 0.5) : 0;
+}
+
+static int nativeViewExtent(double value) {
+    return value > 0 ? (int)(value + 0.5) : 0;
+}
+
+static bool validNativeViewFrame(double x, double y, double width, double height) {
+    return x >= 0 && y >= 0 && width >= 0 && height >= 0;
+}
+
+static bool isNativeContainerKind(int kind) {
+    return kind == kViewToolbar ||
+        kind == kViewTitlebarAccessory ||
+        kind == kViewSidebar ||
+        kind == kViewStatusbar ||
+        kind == kViewSpacer;
+}
+
+static bool isSupportedNativeViewKind(int kind) {
+    return isNativeContainerKind(kind) ||
+        kind == kViewButton ||
+        kind == kViewCheckbox ||
+        kind == kViewToggle ||
+        kind == kViewTextField ||
+        kind == kViewSearchField ||
+        kind == kViewLabel ||
+        kind == kViewProgressIndicator;
+}
+
+static std::string nativeViewDisplayText(const NativeView &view) {
+    if (!view.text.empty()) return view.text;
+    if (!view.role.empty()) return view.role;
+    return view.label;
+}
+
+static POINT nativeViewAbsoluteOrigin(Host *host, const NativeView &view) {
+    POINT point = { nativeViewCoord(view.x), nativeViewCoord(view.y) };
+    if (!host || view.parent.empty()) return point;
+    auto parent = host->native_views.find(nativeViewKey(view.window_id, view.parent));
+    while (parent != host->native_views.end()) {
+        point.x += nativeViewCoord(parent->second.x);
+        point.y += nativeViewCoord(parent->second.y);
+        if (parent->second.parent.empty()) break;
+        parent = host->native_views.find(nativeViewKey(parent->second.window_id, parent->second.parent));
+    }
+    return point;
+}
+
+static void applyNativeViewText(NativeView &view, const std::string &text) {
+    if (!view.hwnd) return;
+    std::wstring wide = widen(text);
+    switch (view.kind) {
+        case kViewTextField:
+        case kViewSearchField:
+            SendMessageW(view.hwnd, EM_SETCUEBANNER, TRUE, reinterpret_cast<LPARAM>(wide.c_str()));
+            break;
+        case kViewProgressIndicator:
+        case kViewSpacer:
+        case kViewToolbar:
+        case kViewTitlebarAccessory:
+        case kViewSidebar:
+        case kViewStatusbar:
+            break;
+        default:
+            SetWindowTextW(view.hwnd, wide.c_str());
+            break;
+    }
+}
+
+static void applyNativeViewFrame(Host *host, NativeView &view) {
+    if (!view.hwnd) return;
+    POINT origin = nativeViewAbsoluteOrigin(host, view);
+    MoveWindow(view.hwnd, origin.x, origin.y, nativeViewExtent(view.width), nativeViewExtent(view.height), TRUE);
+}
+
+static void applyNativeViewState(NativeView &view, bool update_text, const std::string &text) {
+    if (!view.hwnd) return;
+    ShowWindow(view.hwnd, view.visible ? SW_SHOW : SW_HIDE);
+    EnableWindow(view.hwnd, view.enabled ? TRUE : FALSE);
+    if (update_text) applyNativeViewText(view, text);
+}
+
+static void reorderWindowChildren(Host *host, uint64_t window_id) {
+    if (!host) return;
+    struct LayerItem {
+        HWND hwnd;
+        int layer;
+        uint64_t order;
+    };
+    std::vector<LayerItem> items;
+    for (auto &entry : host->webviews) {
+        ChildWebView &webview = entry.second;
+        if (webview.window_id == window_id && webview.hwnd) {
+            items.push_back({ webview.hwnd, webview.layer, webview.creation_order });
+        }
+    }
+    for (auto &entry : host->native_views) {
+        NativeView &view = entry.second;
+        if (view.window_id == window_id && view.hwnd) {
+            items.push_back({ view.hwnd, view.layer, view.creation_order });
+        }
+    }
+    std::sort(items.begin(), items.end(), [](const LayerItem &a, const LayerItem &b) {
+        if (a.layer != b.layer) return a.layer < b.layer;
+        return a.order < b.order;
+    });
+    for (const LayerItem &item : items) {
+        SetWindowPos(item.hwnd, HWND_TOP, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
+    }
+}
+
+static bool emitNativeCommandForHwnd(Host *host, HWND hwnd, WORD notification_code) {
+    if (!host || !host->callback || !hwnd) return false;
+    for (auto &entry : host->native_views) {
+        NativeView &view = entry.second;
+        if (view.hwnd != hwnd || view.command.empty()) continue;
+        const bool button_like = view.kind == kViewButton || view.kind == kViewCheckbox || view.kind == kViewToggle;
+        if (!button_like || notification_code != BN_CLICKED) return false;
+        WindowsEvent event = {};
+        event.kind = kNativeCommand;
+        event.window_id = view.window_id;
+        event.command_name = view.command.c_str();
+        event.command_name_len = view.command.size();
+        event.view_label = view.label.c_str();
+        event.view_label_len = view.label.size();
+        host->callback(host->callback_context, &event);
+        return true;
+    }
+    return false;
+}
+
+static void applyNativeChildFrames(Host *host, uint64_t window_id, const std::string &parent_label) {
+    if (!host) return;
+    for (auto &entry : host->native_views) {
+        NativeView &view = entry.second;
+        if (view.window_id == window_id && view.parent == parent_label) {
+            applyNativeViewFrame(host, view);
+            applyNativeChildFrames(host, window_id, view.label);
+        }
+    }
+}
+
+static void destroyNativeViewAndChildren(Host *host, const std::string &key) {
+    if (!host) return;
+    auto found = host->native_views.find(key);
+    if (found == host->native_views.end()) return;
+    uint64_t window_id = found->second.window_id;
+    std::string label = found->second.label;
+    std::vector<std::string> children;
+    for (const auto &entry : host->native_views) {
+        if (entry.second.window_id == window_id && entry.second.parent == label) children.push_back(entry.first);
+    }
+    for (const std::string &child : children) destroyNativeViewAndChildren(host, child);
+    if (found->second.hwnd) DestroyWindow(found->second.hwnd);
+    host->native_views.erase(found);
+}
+
+static void destroyNativeViewsForWindow(Host *host, uint64_t window_id) {
+    if (!host) return;
+    std::vector<std::string> keys;
+    for (const auto &entry : host->native_views) {
+        if (entry.second.window_id == window_id) keys.push_back(entry.first);
+    }
+    for (const std::string &key : keys) destroyNativeViewAndChildren(host, key);
 }
 
 static void destroyChildWebViewsForWindow(Host *host, uint64_t window_id) {
@@ -390,6 +607,7 @@ static void destroyChildWebViewsForWindow(Host *host, uint64_t window_id) {
 static void destroyAllWindows(Host *host) {
     if (!host) return;
     for (auto &entry : host->windows) {
+        destroyNativeViewsForWindow(host, entry.first);
         destroyChildWebViewsForWindow(host, entry.first);
         if (entry.second.hwnd) {
             DestroyWindow(entry.second.hwnd);
@@ -672,28 +890,8 @@ static bool createChildWebView(Host *host, const std::string &key) {
 
 static void applyChildWebViewLayer(Host *host, uint64_t window_id, const std::string &label) {
     if (!host) return;
-    auto found = host->webviews.find(webViewKey(window_id, label));
-    if (found == host->webviews.end() || !found->second.hwnd) return;
-    HWND insert_after = HWND_TOP;
-    bool found_above = false;
-    int best_layer = INT_MAX;
-    uint64_t best_order = UINT64_MAX;
-    for (auto &entry : host->webviews) {
-        const ChildWebView &candidate = entry.second;
-        if (candidate.window_id != window_id || candidate.label == label || !candidate.hwnd) continue;
-        const bool candidate_above = candidate.layer > found->second.layer ||
-            (candidate.layer == found->second.layer && candidate.creation_order > found->second.creation_order);
-        if (!candidate_above) continue;
-        if (!found_above ||
-            candidate.layer < best_layer ||
-            (candidate.layer == best_layer && candidate.creation_order < best_order)) {
-            insert_after = candidate.hwnd;
-            found_above = true;
-            best_layer = candidate.layer;
-            best_order = candidate.creation_order;
-        }
-    }
-    SetWindowPos(found->second.hwnd, insert_after, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
+    (void)label;
+    reorderWindowChildren(host, window_id);
 }
 
 static Host *hostFromWindow(HWND hwnd) {
@@ -711,6 +909,9 @@ static LRESULT CALLBACK windowProc(HWND hwnd, UINT message, WPARAM wparam, LPARA
         case WM_KEYDOWN:
         case WM_SYSKEYDOWN:
             if (host && emitShortcutForHwnd(host, hwnd, wparam)) return 0;
+            break;
+        case WM_COMMAND:
+            if (host && lparam != 0 && emitNativeCommandForHwnd(host, reinterpret_cast<HWND>(lparam), HIWORD(wparam))) return 0;
             break;
         case WM_SIZE:
             if (host) {
@@ -740,6 +941,7 @@ static LRESULT CALLBACK windowProc(HWND hwnd, UINT message, WPARAM wparam, LPARA
             if (host) {
                 for (auto &entry : host->windows) {
                     if (entry.second.hwnd == hwnd) {
+                        destroyNativeViewsForWindow(host, entry.first);
                         destroyChildWebViewsForWindow(host, entry.first);
                         entry.second.hwnd = nullptr;
                         emit(host, entry.second, kWindowFrame);
@@ -798,6 +1000,11 @@ void zero_native_windows_bridge_respond_window(Host *host, uint64_t window_id, c
 
 Host *zero_native_windows_create(const char *app_name, size_t app_name_len, const char *window_title, size_t window_title_len, const char *bundle_id, size_t bundle_id_len, const char *icon_path, size_t icon_path_len, const char *window_label, size_t window_label_len, double x, double y, double width, double height, int restore_frame) {
     (void)restore_frame;
+    INITCOMMONCONTROLSEX controls = {};
+    controls.dwSize = sizeof(controls);
+    controls.dwICC = ICC_PROGRESS_CLASS;
+    InitCommonControlsEx(&controls);
+
     Host *host = new Host();
     host->app_name = slice(app_name, app_name_len);
     host->window_title = slice(window_title, window_title_len);
@@ -990,8 +1197,175 @@ int zero_native_windows_close_window(Host *host, uint64_t window_id) {
     if (!host) return 0;
     auto found = host->windows.find(window_id);
     if (found == host->windows.end() || !found->second.hwnd) return 0;
+    destroyNativeViewsForWindow(host, window_id);
     destroyChildWebViewsForWindow(host, window_id);
     DestroyWindow(found->second.hwnd);
+    return 1;
+}
+
+int zero_native_windows_create_view(Host *host, uint64_t window_id, const char *label, size_t label_len, int kind, const char *parent, size_t parent_len, double x, double y, double width, double height, int layer, int visible, int enabled, const char *role, size_t role_len, const char *text, size_t text_len, const char *command, size_t command_len) {
+    if (!host || label_len == 0 || !isSupportedNativeViewKind(kind) || !validNativeViewFrame(x, y, width, height)) return 0;
+    auto window = host->windows.find(window_id);
+    if (window == host->windows.end() || !window->second.hwnd) return 0;
+
+    std::string label_string = slice(label, label_len);
+    std::string key = nativeViewKey(window_id, label_string);
+    if (host->native_views.find(key) != host->native_views.end()) return 0;
+
+    std::string parent_string = slice(parent, parent_len);
+    if (!parent_string.empty()) {
+        auto parent_view = host->native_views.find(nativeViewKey(window_id, parent_string));
+        if (parent_view == host->native_views.end() || !parent_view->second.hwnd || !isNativeContainerKind(parent_view->second.kind)) return 0;
+    }
+
+    NativeView view;
+    view.window_id = window_id;
+    view.label = label_string;
+    view.parent = parent_string;
+    view.role = slice(role, role_len);
+    view.text = slice(text, text_len);
+    view.command = slice(command, command_len);
+    view.x = x;
+    view.y = y;
+    view.width = width;
+    view.height = height;
+    view.kind = kind;
+    view.layer = layer;
+    view.creation_order = host->next_child_order++;
+    view.visible = visible != 0;
+    view.enabled = enabled != 0;
+    view.explicit_text = text_len > 0;
+
+    const std::string display_text = nativeViewDisplayText(view);
+    std::wstring wide_text = widen(display_text);
+    std::wstring class_name;
+    DWORD style = WS_CHILD | WS_CLIPSIBLINGS;
+    DWORD ex_style = 0;
+    switch (kind) {
+        case kViewToolbar:
+        case kViewTitlebarAccessory:
+        case kViewSidebar:
+        case kViewStatusbar:
+        case kViewSpacer:
+            class_name = L"STATIC";
+            style |= WS_CLIPCHILDREN | SS_GRAYRECT;
+            wide_text.clear();
+            break;
+        case kViewButton:
+            class_name = L"BUTTON";
+            style |= BS_PUSHBUTTON | WS_TABSTOP;
+            break;
+        case kViewCheckbox:
+            class_name = L"BUTTON";
+            style |= BS_AUTOCHECKBOX | WS_TABSTOP;
+            break;
+        case kViewToggle:
+            class_name = L"BUTTON";
+            style |= BS_AUTOCHECKBOX | BS_PUSHLIKE | WS_TABSTOP;
+            break;
+        case kViewTextField:
+        case kViewSearchField:
+            class_name = L"EDIT";
+            style |= ES_AUTOHSCROLL | WS_TABSTOP | WS_BORDER;
+            wide_text.clear();
+            ex_style = WS_EX_CLIENTEDGE;
+            break;
+        case kViewLabel:
+            class_name = L"STATIC";
+            style |= SS_LEFT | SS_ENDELLIPSIS;
+            break;
+        case kViewProgressIndicator:
+            class_name = PROGRESS_CLASSW;
+            style |= PBS_MARQUEE;
+            wide_text.clear();
+            break;
+        default:
+            return 0;
+    }
+    if (view.visible) style |= WS_VISIBLE;
+
+    POINT origin = nativeViewAbsoluteOrigin(host, view);
+    HWND hwnd = CreateWindowExW(
+        ex_style,
+        class_name.c_str(),
+        wide_text.c_str(),
+        style,
+        origin.x,
+        origin.y,
+        nativeViewExtent(width),
+        nativeViewExtent(height),
+        window->second.hwnd,
+        nullptr,
+        host->instance,
+        nullptr);
+    if (!hwnd) return 0;
+
+    view.hwnd = hwnd;
+    applyNativeViewState(view, true, display_text);
+    if (view.kind == kViewProgressIndicator) {
+        SendMessageW(view.hwnd, PBM_SETMARQUEE, TRUE, 30);
+    }
+    host->native_views[key] = view;
+    reorderWindowChildren(host, window_id);
+    return 1;
+}
+
+int zero_native_windows_update_view(Host *host, uint64_t window_id, const char *label, size_t label_len, int has_frame, double x, double y, double width, double height, int has_layer, int layer, int has_visible, int visible, int has_enabled, int enabled, int has_role, const char *role, size_t role_len, int has_text, const char *text, size_t text_len, int has_command, const char *command, size_t command_len) {
+    if (!host || label_len == 0) return 0;
+    std::string label_string = slice(label, label_len);
+    auto found = host->native_views.find(nativeViewKey(window_id, label_string));
+    if (found == host->native_views.end() || !found->second.hwnd) return 0;
+    NativeView &view = found->second;
+
+    if (has_frame) {
+        if (!validNativeViewFrame(x, y, width, height)) return 0;
+        view.x = x;
+        view.y = y;
+        view.width = width;
+        view.height = height;
+        applyNativeViewFrame(host, view);
+        applyNativeChildFrames(host, window_id, view.label);
+    }
+    if (has_layer) view.layer = layer;
+    if (has_visible) view.visible = visible != 0;
+    if (has_enabled) view.enabled = enabled != 0;
+    if (has_role) view.role = slice(role, role_len);
+    if (has_text) {
+        view.text = slice(text, text_len);
+        view.explicit_text = text_len > 0;
+    }
+    if (has_command) view.command = slice(command, command_len);
+
+    bool update_text = has_text || (has_role && !view.explicit_text);
+    std::string display_text = has_text ? view.text : nativeViewDisplayText(view);
+    if (has_visible || has_enabled || update_text) applyNativeViewState(view, update_text, display_text);
+    if (has_layer) reorderWindowChildren(host, window_id);
+    return 1;
+}
+
+int zero_native_windows_set_view_frame(Host *host, uint64_t window_id, const char *label, size_t label_len, double x, double y, double width, double height) {
+    return zero_native_windows_update_view(host, window_id, label, label_len, 1, x, y, width, height, 0, 0, 0, 1, 0, 1, 0, "", 0, 0, "", 0, 0, "", 0);
+}
+
+int zero_native_windows_set_view_visible(Host *host, uint64_t window_id, const char *label, size_t label_len, int visible) {
+    return zero_native_windows_update_view(host, window_id, label, label_len, 0, 0, 0, 0, 0, 0, 0, 1, visible, 0, 1, 0, "", 0, 0, "", 0, 0, "", 0);
+}
+
+int zero_native_windows_focus_view(Host *host, uint64_t window_id, const char *label, size_t label_len) {
+    if (!host || label_len == 0) return 0;
+    auto found = host->native_views.find(nativeViewKey(window_id, slice(label, label_len)));
+    if (found == host->native_views.end() || !found->second.hwnd || !found->second.visible || !found->second.enabled) return 0;
+    SetFocus(found->second.hwnd);
+    return GetFocus() == found->second.hwnd ? 1 : 0;
+}
+
+int zero_native_windows_close_view(Host *host, uint64_t window_id, const char *label, size_t label_len) {
+    if (!host || label_len == 0) return 0;
+    std::string label_string = slice(label, label_len);
+    std::string key = nativeViewKey(window_id, label_string);
+    if (host->native_views.find(key) == host->native_views.end()) return 0;
+    destroyNativeViewAndChildren(host, key);
+    reorderWindowChildren(host, window_id);
     return 1;
 }
 
@@ -1045,7 +1419,7 @@ int zero_native_windows_create_webview(Host *host, uint64_t window_id, const cha
     webview.width = width;
     webview.height = height;
     webview.layer = layer;
-    webview.creation_order = host->next_webview_order++;
+    webview.creation_order = host->next_child_order++;
     webview.transparent = transparent != 0;
     webview.bridge_enabled = bridge_enabled != 0;
     host->webviews[key] = webview;
