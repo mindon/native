@@ -41,4 +41,4 @@ Select a simulator or device and run the `ZeroNativeIOSExample` scheme.
 - The native Back and Refresh buttons call `zero_native_app_command` with stable mobile command IDs, update status from `zero_native_app_last_command_count`, and request a frame.
 - Controller teardown stops and destroys the app.
 
-The generic desktop `ShellView` runtime is not mapped to UIKit yet; native mobile chrome is implemented directly in Swift in this example.
+The `app.zon` shell view tree describes this header and WebView workspace. Native mobile layout is still implemented in Swift so UIKit owns safe areas, keyboard avoidance, and scene lifecycle.

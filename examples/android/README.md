@@ -49,4 +49,4 @@ Install on an emulator or device:
 - `onTouchEvent` forwards pointer id, phase, position, and pressure.
 - `surfaceDestroyed` and `onDestroy` stop and destroy the app.
 
-The generic desktop `ShellView` runtime is not mapped to Android `ViewGroup` yet; native mobile chrome is implemented directly in Kotlin in this example.
+The `app.zon` shell view tree describes this header and WebView workspace. Native mobile layout is still implemented in Kotlin so Android owns soft-keyboard relayout, Back handling, orientation changes, and activity lifecycle.

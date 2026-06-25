@@ -175,6 +175,7 @@ pub fn createIosSkeleton(io: std.Io, output_path: []const u8) !PackageStats {
     try dir.createDirPath(io, "zero-nativeHost");
     try writeFile(dir, io, "README.md", iosReadme());
     try writeFile(dir, io, "Info.plist", iosInfoPlist());
+    try writeFile(dir, io, "zero-nativeHost/ZeroNativeShellConfig.swift", iosDefaultShellConfig());
     try writeFile(dir, io, "zero-nativeHost/ZeroNativeHostViewController.swift", iosViewController());
     try writeFile(dir, io, "zero-nativeHost/zero_native.h", embedHeader());
     return .{ .path = output_path, .target = .ios };
@@ -192,6 +193,7 @@ pub fn createAndroidSkeleton(io: std.Io, output_path: []const u8) !PackageStats 
     try writeFile(dir, io, "settings.gradle", "pluginManagement { repositories { google(); mavenCentral(); gradlePluginPortal() } }\ndependencyResolutionManagement { repositoriesMode.set(RepositoriesMode.FAIL_ON_PROJECT_REPOS); repositories { google(); mavenCentral() } }\nrootProject.name = 'zero-nativeHost'\ninclude ':app'\n");
     try writeFile(dir, io, "app/build.gradle", androidBuildGradle());
     try writeFile(dir, io, "app/src/main/AndroidManifest.xml", androidManifest());
+    try writeFile(dir, io, "app/src/main/java/dev/zero_native/ZeroNativeShellConfig.kt", androidDefaultShellConfig());
     try writeFile(dir, io, "app/src/main/java/dev/zero_native/MainActivity.kt", androidActivity());
     try writeFile(dir, io, "app/src/main/cpp/CMakeLists.txt", androidCMakeLists());
     try writeFile(dir, io, "app/src/main/cpp/zero_native_jni.c", androidJni());
@@ -268,6 +270,10 @@ fn createIosArtifact(allocator: std.mem.Allocator, io: std.Io, options: PackageO
     const info_plist = try iosInfoPlistForMetadata(allocator, options.metadata);
     defer allocator.free(info_plist);
     try writeFile(dir, io, "Info.plist", info_plist);
+    const shell_model = mobileShellModel(options.metadata);
+    const shell_config = try iosShellConfigAlloc(allocator, shell_model);
+    defer allocator.free(shell_config);
+    try writeFile(dir, io, "zero-nativeHost/ZeroNativeShellConfig.swift", shell_config);
     const assets_output = try assetOutputPath(allocator, options.output_path, "Resources", options);
     defer allocator.free(assets_output);
     const bundle_stats = try assets_tool.bundle(allocator, io, options.assets_dir, assets_output);
@@ -287,6 +293,10 @@ fn createAndroidArtifact(allocator: std.mem.Allocator, io: std.Io, options: Pack
     const manifest = try androidManifestForMetadata(allocator, options.metadata);
     defer allocator.free(manifest);
     try writeFile(dir, io, "app/src/main/AndroidManifest.xml", manifest);
+    const shell_model = mobileShellModel(options.metadata);
+    const shell_config = try androidShellConfigAlloc(allocator, shell_model);
+    defer allocator.free(shell_config);
+    try writeFile(dir, io, "app/src/main/java/dev/zero_native/ZeroNativeShellConfig.kt", shell_config);
     const assets_output = try assetOutputPath(allocator, options.output_path, "app/src/main/assets/zero-native", options);
     defer allocator.free(assets_output);
     const bundle_stats = try assets_tool.bundle(allocator, io, options.assets_dir, assets_output);
@@ -420,6 +430,112 @@ fn iosInfoPlistForMetadata(allocator: std.mem.Allocator, metadata: manifest_tool
     , .{ bundle_id, name, display_name, version, version });
 }
 
+const MobileShellModel = struct {
+    title: []const u8,
+    status: []const u8,
+    primary_button_title: []const u8,
+    primary_command: []const u8,
+    secondary_button_title: []const u8,
+    secondary_command: []const u8,
+};
+
+fn defaultMobileShellModel() MobileShellModel {
+    return .{
+        .title = "zero-native",
+        .status = "Native commands ready",
+        .primary_button_title = "Back",
+        .primary_command = "mobile.back",
+        .secondary_button_title = "Refresh",
+        .secondary_command = "mobile.refresh",
+    };
+}
+
+fn mobileShellModel(metadata: manifest_tool.Metadata) MobileShellModel {
+    var model = defaultMobileShellModel();
+    model.title = metadata.displayName();
+    if (metadata.shell.windows.len == 0) return model;
+
+    for (metadata.shell.windows[0].views) |view| {
+        if (view.text) |text| {
+            if (std.mem.eql(u8, view.label, "mobile-title")) {
+                model.title = text;
+            } else if (std.mem.eql(u8, view.label, "mobile-status") or std.mem.eql(u8, view.kind, "statusbar")) {
+                model.status = text;
+            }
+        }
+        if (view.command) |command| {
+            const title = view.text orelse command;
+            if (std.mem.eql(u8, view.label, "mobile-back") or std.mem.indexOf(u8, command, "back") != null) {
+                model.primary_button_title = title;
+                model.primary_command = command;
+            } else if (std.mem.eql(u8, view.label, "mobile-refresh") or std.mem.indexOf(u8, command, "refresh") != null) {
+                model.secondary_button_title = title;
+                model.secondary_command = command;
+            }
+        }
+    }
+    return model;
+}
+
+fn sourceStringLiteralAlloc(allocator: std.mem.Allocator, value: []const u8) ![]const u8 {
+    var out: std.ArrayList(u8) = .empty;
+    errdefer out.deinit(allocator);
+    try out.append(allocator, '"');
+    for (value) |ch| {
+        switch (ch) {
+            '"' => try out.appendSlice(allocator, "\\\""),
+            '\\' => try out.appendSlice(allocator, "\\\\"),
+            '\n' => try out.appendSlice(allocator, "\\n"),
+            '\r' => try out.appendSlice(allocator, "\\r"),
+            '\t' => try out.appendSlice(allocator, "\\t"),
+            else => try out.append(allocator, ch),
+        }
+    }
+    try out.append(allocator, '"');
+    return out.toOwnedSlice(allocator);
+}
+
+fn iosDefaultShellConfig() []const u8 {
+    return
+    \\enum ZeroNativeShellConfig {
+    \\    static let title = "zero-native"
+    \\    static let status = "Native commands ready"
+    \\    static let primaryButtonTitle = "Back"
+    \\    static let primaryCommand = "mobile.back"
+    \\    static let secondaryButtonTitle = "Refresh"
+    \\    static let secondaryCommand = "mobile.refresh"
+    \\}
+    \\
+    ;
+}
+
+fn iosShellConfigAlloc(allocator: std.mem.Allocator, model: MobileShellModel) ![]const u8 {
+    const title = try sourceStringLiteralAlloc(allocator, model.title);
+    defer allocator.free(title);
+    const status = try sourceStringLiteralAlloc(allocator, model.status);
+    defer allocator.free(status);
+    const primary_title = try sourceStringLiteralAlloc(allocator, model.primary_button_title);
+    defer allocator.free(primary_title);
+    const primary_command = try sourceStringLiteralAlloc(allocator, model.primary_command);
+    defer allocator.free(primary_command);
+    const secondary_title = try sourceStringLiteralAlloc(allocator, model.secondary_button_title);
+    defer allocator.free(secondary_title);
+    const secondary_command = try sourceStringLiteralAlloc(allocator, model.secondary_command);
+    defer allocator.free(secondary_command);
+
+    return std.fmt.allocPrint(allocator,
+        \\enum ZeroNativeShellConfig {{
+        \\    static let title = {s}
+        \\    static let status = {s}
+        \\    static let primaryButtonTitle = {s}
+        \\    static let primaryCommand = {s}
+        \\    static let secondaryButtonTitle = {s}
+        \\    static let secondaryCommand = {s}
+        \\}}
+        \\
+    , .{ title, status, primary_title, primary_command, secondary_title, secondary_command });
+}
+
 fn iosViewController() []const u8 {
     return
     \\import UIKit
@@ -473,15 +589,15 @@ fn iosViewController() []const u8 {
     \\
     \\    private func configureHeader() {
     \\        headerView.backgroundColor = .secondarySystemBackground
-    \\        titleLabel.text = "zero-native"
+    \\        titleLabel.text = ZeroNativeShellConfig.title
     \\        titleLabel.font = .preferredFont(forTextStyle: .title2)
     \\        titleLabel.adjustsFontForContentSizeCategory = true
-    \\        statusLabel.text = "Native commands ready"
+    \\        statusLabel.text = ZeroNativeShellConfig.status
     \\        statusLabel.font = .preferredFont(forTextStyle: .caption1)
     \\        statusLabel.textColor = .secondaryLabel
-    \\        backButton.setTitle("Back", for: .normal)
+    \\        backButton.setTitle(ZeroNativeShellConfig.primaryButtonTitle, for: .normal)
     \\        backButton.addTarget(self, action: #selector(sendBackCommand), for: .touchUpInside)
-    \\        refreshButton.setTitle("Refresh", for: .normal)
+    \\        refreshButton.setTitle(ZeroNativeShellConfig.secondaryButtonTitle, for: .normal)
     \\        refreshButton.addTarget(self, action: #selector(sendRefreshCommand), for: .touchUpInside)
     \\        [titleLabel, statusLabel, backButton, refreshButton].forEach {
     \\            $0.translatesAutoresizingMaskIntoConstraints = false
@@ -500,11 +616,11 @@ fn iosViewController() []const u8 {
     \\    }
     \\
     \\    @objc private func sendBackCommand() {
-    \\        dispatchNativeCommand("mobile.back")
+    \\        dispatchNativeCommand(ZeroNativeShellConfig.primaryCommand)
     \\    }
     \\
     \\    @objc private func sendRefreshCommand() {
-    \\        dispatchNativeCommand("mobile.refresh")
+    \\        dispatchNativeCommand(ZeroNativeShellConfig.secondaryCommand)
     \\    }
     \\
     \\    private func dispatchNativeCommand(_ command: String) {
@@ -656,7 +772,7 @@ fn androidCMakeLists() []const u8 {
 }
 
 fn androidManifest() []const u8 {
-    return "<manifest xmlns:android=\"http://schemas.android.com/apk/res/android\"><application android:theme=\"@style/AppTheme\"><activity android:name=\".MainActivity\" android:configChanges=\"keyboard|keyboardHidden|orientation|screenSize\" android:exported=\"true\" android:windowSoftInputMode=\"adjustResize\"><intent-filter><action android:name=\"android.intent.action.MAIN\"/><category android:name=\"android.intent.category.LAUNCHER\"/></intent-filter></activity></application></manifest>\n";
+    return "<manifest xmlns:android=\"http://schemas.android.com/apk/res/android\"><application android:theme=\"@style/AppTheme\"><activity android:name=\"dev.zero_native.MainActivity\" android:configChanges=\"keyboard|keyboardHidden|orientation|screenSize\" android:exported=\"true\" android:windowSoftInputMode=\"adjustResize\"><intent-filter><action android:name=\"android.intent.action.MAIN\"/><category android:name=\"android.intent.category.LAUNCHER\"/></intent-filter></activity></application></manifest>\n";
 }
 
 fn androidManifestForMetadata(allocator: std.mem.Allocator, metadata: manifest_tool.Metadata) ![]const u8 {
@@ -665,7 +781,7 @@ fn androidManifestForMetadata(allocator: std.mem.Allocator, metadata: manifest_t
     return std.fmt.allocPrint(allocator,
         \\<manifest xmlns:android="http://schemas.android.com/apk/res/android">
         \\  <application android:label="{s}" android:theme="@style/AppTheme">
-        \\    <activity android:name=".MainActivity" android:configChanges="keyboard|keyboardHidden|orientation|screenSize" android:exported="true" android:windowSoftInputMode="adjustResize">
+        \\    <activity android:name="dev.zero_native.MainActivity" android:configChanges="keyboard|keyboardHidden|orientation|screenSize" android:exported="true" android:windowSoftInputMode="adjustResize">
         \\      <intent-filter>
         \\        <action android:name="android.intent.action.MAIN" />
         \\        <category android:name="android.intent.category.LAUNCHER" />
@@ -712,6 +828,51 @@ fn androidApplicationIdAlloc(allocator: std.mem.Allocator, id: []const u8) ![]co
     return out.toOwnedSlice(allocator);
 }
 
+fn androidDefaultShellConfig() []const u8 {
+    return
+    \\package dev.zero_native
+    \\
+    \\object ZeroNativeShellConfig {
+    \\    const val title = "zero-native"
+    \\    const val status = "Native commands ready"
+    \\    const val primaryButtonTitle = "Back"
+    \\    const val primaryCommand = "mobile.back"
+    \\    const val secondaryButtonTitle = "Refresh"
+    \\    const val secondaryCommand = "mobile.refresh"
+    \\}
+    \\
+    ;
+}
+
+fn androidShellConfigAlloc(allocator: std.mem.Allocator, model: MobileShellModel) ![]const u8 {
+    const title = try sourceStringLiteralAlloc(allocator, model.title);
+    defer allocator.free(title);
+    const status = try sourceStringLiteralAlloc(allocator, model.status);
+    defer allocator.free(status);
+    const primary_title = try sourceStringLiteralAlloc(allocator, model.primary_button_title);
+    defer allocator.free(primary_title);
+    const primary_command = try sourceStringLiteralAlloc(allocator, model.primary_command);
+    defer allocator.free(primary_command);
+    const secondary_title = try sourceStringLiteralAlloc(allocator, model.secondary_button_title);
+    defer allocator.free(secondary_title);
+    const secondary_command = try sourceStringLiteralAlloc(allocator, model.secondary_command);
+    defer allocator.free(secondary_command);
+
+    return std.fmt.allocPrint(allocator,
+        \\package dev.zero_native
+        \\
+        \\object ZeroNativeShellConfig {{
+        \\    const val title = {s}
+        \\    const val status = {s}
+        \\    const val primaryButtonTitle = {s}
+        \\    const val primaryCommand = {s}
+        \\    const val secondaryButtonTitle = {s}
+        \\    const val secondaryCommand = {s}
+        \\}}
+        \\
+    , .{ title, status, primary_title, primary_command, secondary_title, secondary_command });
+}
+
 fn androidActivity() []const u8 {
     return
     \\package dev.zero_native
@@ -746,12 +907,12 @@ fn androidActivity() []const u8 {
     \\            setPadding(32, 28, 32, 24)
     \\        }
     \\        val title = TextView(this).apply {
-    \\            text = "zero-native"
+    \\            text = ZeroNativeShellConfig.title
     \\            textSize = 24f
     \\            setTextColor(Color.rgb(24, 24, 27))
     \\        }
     \\        statusLabel = TextView(this).apply {
-    \\            text = "Native commands ready"
+    \\            text = ZeroNativeShellConfig.status
     \\            textSize = 13f
     \\            setTextColor(Color.rgb(95, 102, 114))
     \\            setPadding(0, 8, 0, 0)
@@ -761,12 +922,12 @@ fn androidActivity() []const u8 {
     \\            setPadding(0, 12, 0, 0)
     \\        }
     \\        val back = Button(this).apply {
-    \\            text = "Back"
-    \\            setOnClickListener { dispatchNativeCommand("mobile.back") }
+    \\            text = ZeroNativeShellConfig.primaryButtonTitle
+    \\            setOnClickListener { dispatchNativeCommand(ZeroNativeShellConfig.primaryCommand) }
     \\        }
     \\        val refresh = Button(this).apply {
-    \\            text = "Refresh"
-    \\            setOnClickListener { dispatchNativeCommand("mobile.refresh") }
+    \\            text = ZeroNativeShellConfig.secondaryButtonTitle
+    \\            setOnClickListener { dispatchNativeCommand(ZeroNativeShellConfig.secondaryCommand) }
     \\        }
     \\        actions.addView(back, LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f))
     \\        actions.addView(refresh, LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f))
@@ -852,7 +1013,7 @@ fn androidActivity() []const u8 {
     \\
     \\    override fun onBackPressed() {
     \\        if (nativeApp != 0L) {
-    \\            dispatchNativeCommand("mobile.back")
+    \\            dispatchNativeCommand(ZeroNativeShellConfig.primaryCommand)
     \\            return
     \\        }
     \\        super.onBackPressed()
@@ -1683,9 +1844,11 @@ test "archive path includes correct suffix per platform" {
 test "mobile package templates include native command shells" {
     const ios_controller = iosViewController();
     try std.testing.expect(std.mem.indexOf(u8, ios_controller, "UIButton(type: .system)") != null);
+    try std.testing.expect(std.mem.indexOf(u8, ios_controller, "ZeroNativeShellConfig.primaryCommand") != null);
     try std.testing.expect(std.mem.indexOf(u8, ios_controller, "zero_native_app_command") != null);
     try std.testing.expect(std.mem.indexOf(u8, ios_controller, "zero_native_app_set_asset_root") != null);
     try std.testing.expect(std.mem.indexOf(u8, ios_controller, "keyboardWillChangeFrameNotification") != null);
+    try std.testing.expect(std.mem.indexOf(u8, iosDefaultShellConfig(), "primaryCommand = \"mobile.back\"") != null);
 
     const android_gradle = androidBuildGradle();
     try std.testing.expect(std.mem.indexOf(u8, android_gradle, "org.jetbrains.kotlin.android") != null);
@@ -1694,8 +1857,9 @@ test "mobile package templates include native command shells" {
     const android_activity = androidActivity();
     try std.testing.expect(std.mem.indexOf(u8, android_activity, "System.loadLibrary(\"zero_native_host\")") != null);
     try std.testing.expect(std.mem.indexOf(u8, android_activity, "nativeSetAssetRoot(nativeApp, \"android_asset/zero-native\")") != null);
-    try std.testing.expect(std.mem.indexOf(u8, android_activity, "dispatchNativeCommand(\"mobile.refresh\")") != null);
+    try std.testing.expect(std.mem.indexOf(u8, android_activity, "dispatchNativeCommand(ZeroNativeShellConfig.secondaryCommand)") != null);
     try std.testing.expect(std.mem.indexOf(u8, android_activity, "WebView(this)") != null);
+    try std.testing.expect(std.mem.indexOf(u8, androidDefaultShellConfig(), "const val secondaryCommand = \"mobile.refresh\"") != null);
 
     const android_cmake = androidCMakeLists();
     try std.testing.expect(std.mem.indexOf(u8, android_cmake, "add_library(zero_native_host SHARED zero_native_jni.c)") != null);
@@ -1716,9 +1880,13 @@ test "mobile skeletons create native library drop-in directories" {
 
     var ios_libs = try cwd.openDir(std.testing.io, ".zig-cache/test-package-mobile-skeletons/ios/Libraries", .{});
     ios_libs.close(std.testing.io);
+    var ios_config = try cwd.openFile(std.testing.io, ".zig-cache/test-package-mobile-skeletons/ios/zero-nativeHost/ZeroNativeShellConfig.swift", .{});
+    ios_config.close(std.testing.io);
 
     var android_libs = try cwd.openDir(std.testing.io, ".zig-cache/test-package-mobile-skeletons/android/app/src/main/cpp/lib", .{});
     android_libs.close(std.testing.io);
+    var android_config = try cwd.openFile(std.testing.io, ".zig-cache/test-package-mobile-skeletons/android/app/src/main/java/dev/zero_native/ZeroNativeShellConfig.kt", .{});
+    android_config.close(std.testing.io);
 
     var cmake = try cwd.openFile(std.testing.io, ".zig-cache/test-package-mobile-skeletons/android/app/src/main/cpp/CMakeLists.txt", .{});
     cmake.close(std.testing.io);
@@ -1734,11 +1902,25 @@ test "mobile package artifacts use manifest identity metadata" {
     try cwd.createDirPath(std.testing.io, ".zig-cache/test-package-mobile-identity/assets");
     try cwd.writeFile(std.testing.io, .{ .sub_path = ".zig-cache/test-package-mobile-identity/assets/index.html", .data = "<h1>Mobile</h1>" });
 
+    const shell_views = [_]manifest_tool.ShellViewMetadata{
+        .{ .label = "mobile-header", .kind = "toolbar", .edge = "top", .height = 104 },
+        .{ .label = "mobile-title", .kind = "label", .parent = "mobile-header", .text = "Field Console" },
+        .{ .label = "mobile-status", .kind = "statusbar", .edge = "bottom", .height = 28, .text = "Shell ready" },
+        .{ .label = "mobile-back", .kind = "button", .parent = "mobile-header", .text = "Go Back", .command = "mobile.go_back" },
+        .{ .label = "mobile-refresh", .kind = "button", .parent = "mobile-header", .text = "Sync Now", .command = "mobile.sync" },
+        .{ .label = "workspace", .kind = "webview", .url = "zero://app/index.html", .fill = true },
+    };
+    const shell_windows = [_]manifest_tool.ShellWindowMetadata{.{
+        .label = "main",
+        .title = "Field Console",
+        .views = &shell_views,
+    }};
     const metadata: manifest_tool.Metadata = .{
         .id = "dev.zero-native.mobile-app",
         .name = "mobile-demo",
         .display_name = "Mobile Demo",
         .version = "2.3.4",
+        .shell = .{ .windows = &shell_windows },
     };
 
     const ios_stats = try createIosArtifact(std.testing.allocator, std.testing.io, .{
@@ -1769,6 +1951,21 @@ test "mobile package artifacts use manifest identity metadata" {
     const manifest = try readPath(std.testing.allocator, std.testing.io, ".zig-cache/test-package-mobile-identity/android/app/src/main/AndroidManifest.xml");
     defer std.testing.allocator.free(manifest);
     try std.testing.expect(std.mem.indexOf(u8, manifest, "android:label=\"Mobile Demo\"") != null);
+    try std.testing.expect(std.mem.indexOf(u8, manifest, "android:name=\"dev.zero_native.MainActivity\"") != null);
+
+    const ios_shell_config = try readPath(std.testing.allocator, std.testing.io, ".zig-cache/test-package-mobile-identity/ios/zero-nativeHost/ZeroNativeShellConfig.swift");
+    defer std.testing.allocator.free(ios_shell_config);
+    try std.testing.expect(std.mem.indexOf(u8, ios_shell_config, "static let title = \"Field Console\"") != null);
+    try std.testing.expect(std.mem.indexOf(u8, ios_shell_config, "static let status = \"Shell ready\"") != null);
+    try std.testing.expect(std.mem.indexOf(u8, ios_shell_config, "static let primaryCommand = \"mobile.go_back\"") != null);
+    try std.testing.expect(std.mem.indexOf(u8, ios_shell_config, "static let secondaryButtonTitle = \"Sync Now\"") != null);
+
+    const android_shell_config = try readPath(std.testing.allocator, std.testing.io, ".zig-cache/test-package-mobile-identity/android/app/src/main/java/dev/zero_native/ZeroNativeShellConfig.kt");
+    defer std.testing.allocator.free(android_shell_config);
+    try std.testing.expect(std.mem.indexOf(u8, android_shell_config, "const val title = \"Field Console\"") != null);
+    try std.testing.expect(std.mem.indexOf(u8, android_shell_config, "const val status = \"Shell ready\"") != null);
+    try std.testing.expect(std.mem.indexOf(u8, android_shell_config, "const val primaryButtonTitle = \"Go Back\"") != null);
+    try std.testing.expect(std.mem.indexOf(u8, android_shell_config, "const val secondaryCommand = \"mobile.sync\"") != null);
 
     const ios_asset = try readPath(std.testing.allocator, std.testing.io, ".zig-cache/test-package-mobile-identity/ios/Resources/index.html");
     defer std.testing.allocator.free(ios_asset);
