@@ -44,7 +44,7 @@ pub fn writeText(input: Input, writer: anytype) !void {
     }
     for (input.views) |view| {
         try writer.print(
-            "  view @w{d}/{s} kind={s} role=\"{s}\" text=\"{s}\" bounds=({d},{d} {d}x{d}) layer={d} visible={any} enabled={any} open={any}\n",
+            "  view @w{d}/{s} kind={s} role=\"{s}\" text=\"{s}\" bounds=({d},{d} {d}x{d}) layer={d} visible={any} enabled={any} focused={any} open={any}\n",
             .{
                 view.window_id,
                 view.label,
@@ -58,6 +58,7 @@ pub fn writeText(input: Input, writer: anytype) !void {
                 view.layer,
                 view.visible,
                 view.enabled,
+                view.focused,
                 view.open,
             },
         );
@@ -99,7 +100,7 @@ test "snapshot emits window and source" {
     var buffer: [512]u8 = undefined;
     var writer = std.Io.Writer.fixed(&buffer);
     const windows = [_]Window{.{ .title = "Test", .bounds = geometry.RectF.init(0, 0, 100, 100) }};
-    const views = [_]platform.ViewInfo{.{ .label = "main", .kind = .webview, .frame = geometry.RectF.init(0, 0, 100, 100), .role = "webview", .text = "Main content" }};
+    const views = [_]platform.ViewInfo{.{ .label = "main", .kind = .webview, .frame = geometry.RectF.init(0, 0, 100, 100), .role = "webview", .text = "Main content", .focused = true }};
     try writeText(.{
         .windows = &windows,
         .views = &views,
@@ -109,6 +110,7 @@ test "snapshot emits window and source" {
     try std.testing.expect(std.mem.indexOf(u8, writer.buffered(), "@w1") != null);
     try std.testing.expect(std.mem.indexOf(u8, writer.buffered(), "view @w1/main kind=webview") != null);
     try std.testing.expect(std.mem.indexOf(u8, writer.buffered(), "text=\"Main content\"") != null);
+    try std.testing.expect(std.mem.indexOf(u8, writer.buffered(), "focused=true") != null);
     try std.testing.expect(std.mem.indexOf(u8, writer.buffered(), "source kind=html") != null);
 }
 

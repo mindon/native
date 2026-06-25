@@ -360,6 +360,7 @@ pub const WebViewInfo = struct {
     zoom: f64 = 1.0,
     transparent: bool = false,
     bridge_enabled: bool = false,
+    focused: bool = false,
     open: bool = true,
 };
 
@@ -439,6 +440,7 @@ pub const ViewInfo = struct {
     url: []const u8 = "",
     transparent: bool = false,
     bridge_enabled: bool = false,
+    focused: bool = false,
     open: bool = true,
 };
 

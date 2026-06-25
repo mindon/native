@@ -444,6 +444,8 @@ pub const Runtime = struct {
         try validateViewLabel(label);
         if (!self.viewLabelExists(window_id, label)) return error.ViewNotFound;
         try self.options.platform.services.focusView(window_id, label);
+        self.setFocusedView(window_id, label);
+        self.invalidateFor(.command, null);
     }
 
     pub fn readClipboard(self: *Runtime, buffer: []u8) anyerror![]const u8 {
@@ -972,6 +974,7 @@ pub const Runtime = struct {
         self.windows[index].main_frame_set = false;
         self.windows[index].main_layer = 0;
         self.windows[index].main_zoom = 1.0;
+        self.windows[index].main_focused = self.windows[index].info.focused;
         self.window_count += 1;
         self.next_window_id = @max(self.next_window_id, id + 1);
         return index;
@@ -1905,6 +1908,7 @@ pub const Runtime = struct {
                 .zoom = next.zoom,
                 .transparent = next.transparent,
                 .bridge_enabled = next.bridge_enabled,
+                .focused = next.focused,
                 .open = next.open,
             };
             self.webviews[cursor].label = copyInto(&self.webviews[cursor].label_storage, next.label) catch unreachable;
@@ -1936,6 +1940,7 @@ pub const Runtime = struct {
             .zoom = window.main_zoom,
             .transparent = false,
             .bridge_enabled = true,
+            .focused = window.main_focused,
             .open = window.info.open,
         };
     }
@@ -2017,6 +2022,7 @@ pub const Runtime = struct {
             .enabled = options.enabled,
             .transparent = options.transparent,
             .bridge_enabled = options.bridge_enabled,
+            .focused = false,
             .open = true,
         };
         self.views[index].label = try copyInto(&self.views[index].label_storage, options.label);
@@ -2042,6 +2048,18 @@ pub const Runtime = struct {
         const parent_index = self.findViewIndex(window_id, parent_label) orelse return .native_view;
         if (self.views[parent_index].kind == .toolbar) return .toolbar;
         return .native_view;
+    }
+
+    fn setFocusedView(self: *Runtime, window_id: platform.WindowId, label: []const u8) void {
+        if (self.findWindowIndexById(window_id)) |window_index| {
+            self.windows[window_index].main_focused = std.mem.eql(u8, label, "main");
+        }
+        for (self.views[0..self.view_count]) |*view| {
+            if (view.window_id == window_id) view.focused = std.mem.eql(u8, view.label, label);
+        }
+        for (self.webviews[0..self.webview_count]) |*webview| {
+            if (webview.window_id == window_id) webview.focused = std.mem.eql(u8, webview.label, label);
+        }
     }
 
     fn storeTrayItems(self: *Runtime, items: []const platform.TrayMenuItem) !void {
@@ -2079,6 +2097,7 @@ pub const Runtime = struct {
                 .enabled = next.enabled,
                 .transparent = next.transparent,
                 .bridge_enabled = next.bridge_enabled,
+                .focused = next.focused,
                 .open = next.open,
             };
             self.views[cursor].label = copyInto(&self.views[cursor].label_storage, next.label) catch unreachable;
@@ -2181,6 +2200,7 @@ const RuntimeWindow = struct {
     main_frame_set: bool = false,
     main_layer: i32 = 0,
     main_zoom: f64 = 1.0,
+    main_focused: bool = false,
     label_storage: [platform.max_window_label_bytes]u8 = undefined,
     title_storage: [platform.max_window_title_bytes]u8 = undefined,
     source_storage: [platform.max_window_source_bytes]u8 = undefined,
@@ -2195,6 +2215,7 @@ const RuntimeWebView = struct {
     zoom: f64 = 1.0,
     transparent: bool = false,
     bridge_enabled: bool = false,
+    focused: bool = false,
     open: bool = false,
     label_storage: [platform.max_webview_label_bytes]u8 = undefined,
     url_storage: [platform.max_webview_url_bytes]u8 = undefined,
@@ -2230,6 +2251,7 @@ const RuntimeView = struct {
     command: []const u8 = "",
     transparent: bool = false,
     bridge_enabled: bool = false,
+    focused: bool = false,
     open: bool = false,
     label_storage: [platform.max_view_label_bytes]u8 = undefined,
     parent_storage: [platform.max_view_label_bytes]u8 = undefined,
@@ -2253,6 +2275,7 @@ const RuntimeView = struct {
             .url = "",
             .transparent = self.transparent,
             .bridge_enabled = self.bridge_enabled,
+            .focused = self.focused,
             .open = self.open,
         };
     }
@@ -2637,7 +2660,7 @@ fn writeViewJsonToWriter(view: platform.ViewInfo, writer: anytype) !void {
     try json.writeString(writer, view.command);
     try writer.writeAll(",\"url\":");
     try json.writeString(writer, view.url);
-    try writer.print(",\"x\":{d},\"y\":{d},\"width\":{d},\"height\":{d},\"layer\":{d},\"visible\":{},\"enabled\":{},\"transparent\":{},\"bridge\":{},\"open\":{}}}", .{
+    try writer.print(",\"x\":{d},\"y\":{d},\"width\":{d},\"height\":{d},\"layer\":{d},\"visible\":{},\"enabled\":{},\"transparent\":{},\"bridge\":{},\"focused\":{},\"open\":{}}}", .{
         view.frame.x,
         view.frame.y,
         view.frame.width,
@@ -2647,6 +2670,7 @@ fn writeViewJsonToWriter(view: platform.ViewInfo, writer: anytype) !void {
         view.enabled,
         view.transparent,
         view.bridge_enabled,
+        view.focused,
         view.open,
     });
 }
@@ -2665,6 +2689,7 @@ fn viewInfoFromWebView(webview: RuntimeWebView) platform.ViewInfo {
         .url = webview.url,
         .transparent = webview.transparent,
         .bridge_enabled = webview.bridge_enabled,
+        .focused = webview.focused,
         .open = webview.open,
     };
 }
@@ -2674,7 +2699,7 @@ fn writeWebViewJsonToWriter(webview: RuntimeWebView, writer: anytype) !void {
     try json.writeString(writer, webview.label);
     try writer.print(",\"windowId\":{d},\"url\":", .{webview.window_id});
     try json.writeString(writer, webview.url);
-    try writer.print(",\"x\":{d},\"y\":{d},\"width\":{d},\"height\":{d},\"layer\":{d},\"zoom\":{d},\"transparent\":{},\"bridge\":{},\"open\":{}}}", .{
+    try writer.print(",\"x\":{d},\"y\":{d},\"width\":{d},\"height\":{d},\"layer\":{d},\"zoom\":{d},\"transparent\":{},\"bridge\":{},\"focused\":{},\"open\":{}}}", .{
         webview.frame.x,
         webview.frame.y,
         webview.frame.width,
@@ -2683,6 +2708,7 @@ fn writeWebViewJsonToWriter(webview: RuntimeWebView, writer: anytype) !void {
         webview.zoom,
         webview.transparent,
         webview.bridge_enabled,
+        webview.focused,
         webview.open,
     });
 }
@@ -3227,10 +3253,15 @@ test "runtime exposes startup WebView and native views through generic view API"
     try std.testing.expectEqual(@as(usize, 2), views.len);
     try std.testing.expectEqual(platform.ViewKind.webview, views[0].kind);
     try std.testing.expectEqualStrings("main", views[0].label);
+    try std.testing.expect(views[0].focused);
     try std.testing.expectEqual(platform.ViewKind.toolbar, views[1].kind);
     try std.testing.expectEqualStrings("toolbar", views[1].label);
+    try std.testing.expect(!views[1].focused);
 
     try harness.runtime.focusView(1, "toolbar");
+    const focused_views = harness.runtime.listViews(1, &views_buffer);
+    try std.testing.expect(!focused_views[0].focused);
+    try std.testing.expect(focused_views[1].focused);
 
     const updated = try harness.runtime.updateView(1, "toolbar", .{
         .frame = geometry.RectF.init(0, 0, 640, 52),
@@ -3240,6 +3271,7 @@ test "runtime exposes startup WebView and native views through generic view API"
     });
     try std.testing.expectEqual(@as(f32, 52), updated.frame.height);
     try std.testing.expect(!updated.visible);
+    try std.testing.expect(updated.focused);
     try std.testing.expectEqualStrings("Actions", updated.text);
     try std.testing.expectEqualStrings("app.toolbar.updated", updated.command);
 
@@ -3623,14 +3655,17 @@ test "runtime automation snapshot includes generic views" {
         .role = "status",
         .text = "Ready",
     });
+    try harness.runtime.focusView(1, "status");
 
     const snapshot = harness.runtime.automationSnapshot("Snapshot");
     try std.testing.expect(snapshot.views.len >= 2);
     try std.testing.expectEqualStrings("main", snapshot.views[0].label);
     try std.testing.expectEqual(platform.ViewKind.webview, snapshot.views[0].kind);
+    try std.testing.expect(!snapshot.views[0].focused);
     try std.testing.expectEqualStrings("status", snapshot.views[1].label);
     try std.testing.expectEqual(platform.ViewKind.statusbar, snapshot.views[1].kind);
     try std.testing.expectEqualStrings("Ready", snapshot.views[1].text);
+    try std.testing.expect(snapshot.views[1].focused);
 }
 
 test "runtime configures platform keyboard shortcuts" {
@@ -4511,6 +4546,7 @@ test "runtime handles built-in JavaScript view bridge commands" {
         .window_id = 1,
     } });
     try std.testing.expect(std.mem.indexOf(u8, harness.null_platform.lastBridgeResponse(), "\"label\":\"toolbar\"") != null);
+    try std.testing.expect(std.mem.indexOf(u8, harness.null_platform.lastBridgeResponse(), "\"focused\":true") != null);
 
     try harness.runtime.dispatchPlatformEvent(app_state.app(), .{ .bridge_message = .{
         .bytes = "{\"id\":\"4\",\"command\":\"zero-native.view.setFrame\",\"payload\":{\"label\":\"toolbar\",\"frame\":{\"x\":0,\"y\":0,\"width\":640,\"height\":52}}}",

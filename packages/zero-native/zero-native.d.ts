@@ -174,6 +174,7 @@ export interface ZeroNativeViewInfo {
   enabled: boolean;
   transparent: boolean;
   bridge: boolean;
+  focused: boolean;
   command: string;
   open: boolean;
 }

@@ -49,7 +49,7 @@ Coordinates are logical content coordinates relative to the parent window: `x: 0
 
 `windowId` defaults to the window that calls the command. If you pass it explicitly, it must match the calling window; one window cannot manage another window's WebViews.
 
-`webviews.list()` includes `main` first, followed by open child WebViews in the calling window. `main` reports the current startup WebView frame, layer, bridge state, and source URL.
+`webviews.list()` includes `main` first, followed by open child WebViews in the calling window. `main` reports the current startup WebView frame, layer, bridge state, focus state, and source URL.
 
 You can also enable the helpers with an explicit `builtin_bridge` policy instead of `js_window_api`. In that mode, list every WebView command your app calls: `zero-native.webview.create`, `zero-native.webview.list`, `zero-native.webview.setFrame`, `zero-native.webview.navigate`, `zero-native.webview.setZoom`, `zero-native.webview.setLayer`, and `zero-native.webview.close`.
 

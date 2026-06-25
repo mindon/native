@@ -57,3 +57,5 @@ The macOS, Linux, and Windows system-WebView backends support these native kinds
 For declarative shell views, use `edge` for docked chrome, `fill = true` for content, `parent` for controls inside containers, and min/max size fields when a surface needs resize constraints. The runtime keeps shell views bound to the window and reapplies their frames on resize.
 
 Use `role` for accessibility text. Use `text` for visible labels, button titles, and text/search placeholders when no separate role is needed.
+
+`ViewInfo.focused` reports the last successfully focused view in a window. Automation snapshots include the same focus state for native controls and WebView-backed views.
