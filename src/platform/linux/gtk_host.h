@@ -119,6 +119,8 @@ int zero_native_gtk_navigate_webview(zero_native_gtk_host_t *host, uint64_t wind
 int zero_native_gtk_set_webview_zoom(zero_native_gtk_host_t *host, uint64_t window_id, const char *label, size_t label_len, double zoom);
 int zero_native_gtk_set_webview_layer(zero_native_gtk_host_t *host, uint64_t window_id, const char *label, size_t label_len, int layer);
 int zero_native_gtk_close_webview(zero_native_gtk_host_t *host, uint64_t window_id, const char *label, size_t label_len);
+int zero_native_gtk_open_external_url(zero_native_gtk_host_t *host, const char *url, size_t url_len);
+int zero_native_gtk_reveal_path(zero_native_gtk_host_t *host, const char *path, size_t path_len);
 size_t zero_native_gtk_clipboard_read(zero_native_gtk_host_t *host, char *buffer, size_t buffer_len);
 void zero_native_gtk_clipboard_write(zero_native_gtk_host_t *host, const char *text, size_t text_len);
 zero_native_gtk_open_dialog_result_t zero_native_gtk_show_open_dialog(zero_native_gtk_host_t *host, const zero_native_gtk_open_dialog_opts_t *opts, char *buffer, size_t buffer_len);

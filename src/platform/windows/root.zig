@@ -85,6 +85,8 @@ extern fn zero_native_windows_navigate_webview(host: *WindowsHost, window_id: u6
 extern fn zero_native_windows_set_webview_zoom(host: *WindowsHost, window_id: u64, label: [*]const u8, label_len: usize, zoom: f64) c_int;
 extern fn zero_native_windows_set_webview_layer(host: *WindowsHost, window_id: u64, label: [*]const u8, label_len: usize, layer: c_int) c_int;
 extern fn zero_native_windows_close_webview(host: *WindowsHost, window_id: u64, label: [*]const u8, label_len: usize) c_int;
+extern fn zero_native_windows_open_external_url(host: *WindowsHost, url: [*]const u8, url_len: usize) c_int;
+extern fn zero_native_windows_reveal_path(host: *WindowsHost, path: [*]const u8, path_len: usize) c_int;
 extern fn zero_native_windows_clipboard_read(host: *WindowsHost, buffer: [*]u8, buffer_len: usize) usize;
 extern fn zero_native_windows_clipboard_write(host: *WindowsHost, text: [*]const u8, text_len: usize) void;
 
@@ -154,6 +156,8 @@ pub const WindowsPlatform = struct {
                 .set_webview_zoom_fn = setWebViewZoom,
                 .set_webview_layer_fn = setWebViewLayer,
                 .close_webview_fn = closeWebView,
+                .open_external_url_fn = openExternalUrl,
+                .reveal_path_fn = revealPath,
                 .configure_security_policy_fn = configureSecurityPolicy,
                 .configure_shortcuts_fn = configureShortcuts,
                 .emit_window_event_fn = emitWindowEvent,
@@ -465,6 +469,18 @@ fn closeWebView(context: ?*anyopaque, window_id: platform_mod.WindowId, label: [
     const self: *WindowsPlatform = @ptrCast(@alignCast(context.?));
     if (std.mem.eql(u8, label, "main")) return error.InvalidWebViewOptions;
     if (zero_native_windows_close_webview(self.host, window_id, label.ptr, label.len) == 0) return error.WebViewNotFound;
+}
+
+fn openExternalUrl(context: ?*anyopaque, url: []const u8) anyerror!void {
+    const self: *WindowsPlatform = @ptrCast(@alignCast(context.?));
+    if (self.web_engine != .system) return error.UnsupportedService;
+    if (zero_native_windows_open_external_url(self.host, url.ptr, url.len) == 0) return error.UnsupportedService;
+}
+
+fn revealPath(context: ?*anyopaque, path: []const u8) anyerror!void {
+    const self: *WindowsPlatform = @ptrCast(@alignCast(context.?));
+    if (self.web_engine != .system) return error.UnsupportedService;
+    if (zero_native_windows_reveal_path(self.host, path.ptr, path.len) == 0) return error.UnsupportedService;
 }
 
 fn configureSecurityPolicy(context: ?*anyopaque, policy: security.Policy) anyerror!void {

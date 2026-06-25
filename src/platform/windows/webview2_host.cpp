@@ -1369,6 +1369,23 @@ int zero_native_windows_close_view(Host *host, uint64_t window_id, const char *l
     return 1;
 }
 
+int zero_native_windows_open_external_url(Host *host, const char *url, size_t url_len) {
+    (void)host;
+    if (!url || url_len == 0) return 0;
+    std::wstring target = widen(slice(url, url_len));
+    HINSTANCE result = ShellExecuteW(nullptr, L"open", target.c_str(), nullptr, nullptr, SW_SHOWNORMAL);
+    return reinterpret_cast<intptr_t>(result) > 32 ? 1 : 0;
+}
+
+int zero_native_windows_reveal_path(Host *host, const char *path, size_t path_len) {
+    (void)host;
+    if (!path || path_len == 0) return 0;
+    std::wstring target = widen(slice(path, path_len));
+    std::wstring args = L"/select,\"" + target + L"\"";
+    HINSTANCE result = ShellExecuteW(nullptr, L"open", L"explorer.exe", args.c_str(), nullptr, SW_SHOWNORMAL);
+    return reinterpret_cast<intptr_t>(result) > 32 ? 1 : 0;
+}
+
 int zero_native_windows_create_webview(Host *host, uint64_t window_id, const char *label, size_t label_len, const char *url, size_t url_len, double x, double y, double width, double height, int layer, int transparent, int bridge_enabled) {
 #if !ZERO_NATIVE_HAS_WEBVIEW2
     (void)host;

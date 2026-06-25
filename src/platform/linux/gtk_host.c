@@ -1755,6 +1755,35 @@ int zero_native_gtk_close_webview(zero_native_gtk_host_t *host, uint64_t window_
     return 0;
 }
 
+int zero_native_gtk_open_external_url(zero_native_gtk_host_t *host, const char *url, size_t url_len) {
+    if (!host || !url || url_len == 0) return 0;
+    char *url_copy = zero_native_strndup(url, url_len);
+    if (!url_copy) return 0;
+    zero_native_open_external_uri(zero_native_parent_window(host), url_copy);
+    free(url_copy);
+    return 1;
+}
+
+int zero_native_gtk_reveal_path(zero_native_gtk_host_t *host, const char *path, size_t path_len) {
+    if (!host || !path || path_len == 0) return 0;
+    char *path_copy = zero_native_strndup(path, path_len);
+    if (!path_copy) return 0;
+    char *target = NULL;
+    if (g_file_test(path_copy, G_FILE_TEST_IS_DIR)) {
+        target = g_strdup(path_copy);
+    } else {
+        target = g_path_get_dirname(path_copy);
+    }
+    free(path_copy);
+    if (!target) return 0;
+    char *uri = g_filename_to_uri(target, NULL, NULL);
+    g_free(target);
+    if (!uri) return 0;
+    zero_native_open_external_uri(zero_native_parent_window(host), uri);
+    g_free(uri);
+    return 1;
+}
+
 typedef struct zero_native_clipboard_read_state {
     GMainLoop *loop;
     char *text;

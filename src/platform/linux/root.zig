@@ -85,6 +85,8 @@ extern fn zero_native_gtk_navigate_webview(host: *GtkHost, window_id: u64, label
 extern fn zero_native_gtk_set_webview_zoom(host: *GtkHost, window_id: u64, label: [*]const u8, label_len: usize, zoom: f64) c_int;
 extern fn zero_native_gtk_set_webview_layer(host: *GtkHost, window_id: u64, label: [*]const u8, label_len: usize, layer: c_int) c_int;
 extern fn zero_native_gtk_close_webview(host: *GtkHost, window_id: u64, label: [*]const u8, label_len: usize) c_int;
+extern fn zero_native_gtk_open_external_url(host: *GtkHost, url: [*]const u8, url_len: usize) c_int;
+extern fn zero_native_gtk_reveal_path(host: *GtkHost, path: [*]const u8, path_len: usize) c_int;
 extern fn zero_native_gtk_clipboard_read(host: *GtkHost, buffer: [*]u8, buffer_len: usize) usize;
 extern fn zero_native_gtk_clipboard_write(host: *GtkHost, text: [*]const u8, text_len: usize) void;
 
@@ -204,6 +206,8 @@ pub const LinuxPlatform = struct {
                 .show_open_dialog_fn = showOpenDialog,
                 .show_save_dialog_fn = showSaveDialog,
                 .show_message_dialog_fn = showMessageDialog,
+                .open_external_url_fn = openExternalUrl,
+                .reveal_path_fn = revealPath,
                 .create_tray_fn = createTray,
                 .update_tray_menu_fn = updateTrayMenu,
                 .remove_tray_fn = removeTray,
@@ -588,6 +592,18 @@ fn showMessageDialog(context: ?*anyopaque, options: platform_mod.MessageDialogOp
         .tertiary_button_len = options.tertiary_button.len,
     };
     return @enumFromInt(zero_native_gtk_show_message_dialog(self.host, &opts));
+}
+
+fn openExternalUrl(context: ?*anyopaque, url: []const u8) anyerror!void {
+    const self: *LinuxPlatform = @ptrCast(@alignCast(context.?));
+    if (self.web_engine != .system) return error.UnsupportedService;
+    if (zero_native_gtk_open_external_url(self.host, url.ptr, url.len) == 0) return error.UnsupportedService;
+}
+
+fn revealPath(context: ?*anyopaque, path: []const u8) anyerror!void {
+    const self: *LinuxPlatform = @ptrCast(@alignCast(context.?));
+    if (self.web_engine != .system) return error.UnsupportedService;
+    if (zero_native_gtk_reveal_path(self.host, path.ptr, path.len) == 0) return error.UnsupportedService;
 }
 
 fn createTray(context: ?*anyopaque, options: platform_mod.TrayOptions) anyerror!void {
