@@ -9,6 +9,7 @@
 #include <stdint.h>
 #include <stdlib.h>
 #include <string.h>
+#include <stdio.h>
 
 #include <algorithm>
 #include <cctype>
@@ -508,10 +509,102 @@ static bool policyListMatches(const std::vector<std::string> &values, const std:
     return false;
 }
 
-static size_t boundedLen(const char *text, size_t limit) {
+static size_t boundedWideLen(const wchar_t *text, size_t limit) {
     size_t len = 0;
-    while (len < limit && text[len] != '\0') ++len;
+    while (len < limit && text[len] != L'\0') ++len;
     return len;
+}
+
+static size_t copyBytesToBuffer(char *buffer, size_t buffer_len, const std::string &bytes) {
+    if (!buffer || buffer_len == 0) return 0;
+    size_t len = std::min(buffer_len, bytes.size());
+    if (len > 0) memcpy(buffer, bytes.data(), len);
+    return len;
+}
+
+static std::string lowerAscii(std::string value) {
+    for (char &ch : value) ch = static_cast<char>(std::tolower(static_cast<unsigned char>(ch)));
+    return value;
+}
+
+static UINT htmlClipboardFormat() {
+    static UINT format = RegisterClipboardFormatA("HTML Format");
+    return format;
+}
+
+static UINT rtfClipboardFormat() {
+    static UINT format = RegisterClipboardFormatA("Rich Text Format");
+    return format;
+}
+
+static UINT clipboardFormatForMime(const char *mime_type, size_t mime_type_len) {
+    std::string mime = lowerAscii(slice(mime_type, mime_type_len));
+    if (mime == "text" || mime == "text/plain") return CF_UNICODETEXT;
+    if (mime == "text/html") return htmlClipboardFormat();
+    if (mime == "text/rtf" || mime == "application/rtf") return rtfClipboardFormat();
+    return 0;
+}
+
+static bool patchCfHtmlOffset(std::string &header, const char *key, size_t value) {
+    size_t index = header.find(key);
+    if (index == std::string::npos) return false;
+    index += strlen(key);
+    if (index + 10 > header.size()) return false;
+    char digits[11] = {};
+    snprintf(digits, sizeof(digits), "%010zu", value);
+    header.replace(index, 10, digits);
+    return true;
+}
+
+static std::string htmlClipboardPayload(const std::string &fragment) {
+    const std::string start_marker = "<!--StartFragment-->";
+    const std::string end_marker = "<!--EndFragment-->";
+    const std::string html_prefix = "<html><body>" + start_marker;
+    const std::string html_suffix = end_marker + "</body></html>";
+    std::string header =
+        "Version:0.9\r\n"
+        "StartHTML:0000000000\r\n"
+        "EndHTML:0000000000\r\n"
+        "StartFragment:0000000000\r\n"
+        "EndFragment:0000000000\r\n";
+    std::string html = html_prefix + fragment + html_suffix;
+    size_t start_html = header.size();
+    size_t start_fragment = start_html + html_prefix.size();
+    size_t end_fragment = start_fragment + fragment.size();
+    size_t end_html = start_html + html.size();
+    patchCfHtmlOffset(header, "StartHTML:", start_html);
+    patchCfHtmlOffset(header, "EndHTML:", end_html);
+    patchCfHtmlOffset(header, "StartFragment:", start_fragment);
+    patchCfHtmlOffset(header, "EndFragment:", end_fragment);
+    return header + html;
+}
+
+static bool parseCfHtmlOffset(const std::string &payload, const char *key, size_t *out) {
+    size_t index = payload.find(key);
+    if (index == std::string::npos) return false;
+    index += strlen(key);
+    size_t value = 0;
+    size_t digits = 0;
+    while (index < payload.size() && payload[index] >= '0' && payload[index] <= '9') {
+        value = value * 10 + static_cast<size_t>(payload[index] - '0');
+        index++;
+        digits++;
+    }
+    if (digits == 0) return false;
+    *out = value;
+    return true;
+}
+
+static std::string extractHtmlClipboardFragment(const std::string &payload) {
+    size_t start = 0;
+    size_t end = 0;
+    if (parseCfHtmlOffset(payload, "StartFragment:", &start) &&
+        parseCfHtmlOffset(payload, "EndFragment:", &end) &&
+        start <= end &&
+        end <= payload.size()) {
+        return payload.substr(start, end - start);
+    }
+    return payload;
 }
 
 static void emit(Host *host, const Window &window, EventKind kind) {
@@ -1434,6 +1527,8 @@ extern "C" {
 
 void zero_native_windows_load_window_webview(Host *host, uint64_t window_id, const char *source, size_t source_len, int source_kind, const char *asset_root, size_t asset_root_len, const char *asset_entry, size_t asset_entry_len, const char *asset_origin, size_t asset_origin_len, int spa_fallback);
 void zero_native_windows_bridge_respond_window(Host *host, uint64_t window_id, const char *response, size_t response_len);
+size_t zero_native_windows_clipboard_read_data(Host *host, const char *mime_type, size_t mime_type_len, char *buffer, size_t buffer_len);
+int zero_native_windows_clipboard_write_data(Host *host, const char *mime_type, size_t mime_type_len, const char *bytes, size_t bytes_len);
 
 Host *zero_native_windows_create(const char *app_name, size_t app_name_len, const char *window_title, size_t window_title_len, const char *bundle_id, size_t bundle_id_len, const char *icon_path, size_t icon_path_len, const char *window_label, size_t window_label_len, double x, double y, double width, double height, int restore_frame) {
     (void)restore_frame;
@@ -2292,38 +2387,85 @@ int zero_native_windows_close_webview(Host *host, uint64_t window_id, const char
 }
 
 size_t zero_native_windows_clipboard_read(Host *host, char *buffer, size_t buffer_len) {
+    return zero_native_windows_clipboard_read_data(host, "text/plain", strlen("text/plain"), buffer, buffer_len);
+}
+
+void zero_native_windows_clipboard_write(Host *host, const char *text, size_t text_len) {
+    (void)zero_native_windows_clipboard_write_data(host, "text/plain", strlen("text/plain"), text, text_len);
+}
+
+size_t zero_native_windows_clipboard_read_data(Host *host, const char *mime_type, size_t mime_type_len, char *buffer, size_t buffer_len) {
     (void)host;
-    if (!buffer || buffer_len == 0 || !OpenClipboard(nullptr)) return 0;
-    HANDLE handle = GetClipboardData(CF_TEXT);
+    UINT format = clipboardFormatForMime(mime_type, mime_type_len);
+    if (!format || !buffer || buffer_len == 0 || !OpenClipboard(nullptr)) return 0;
+    HANDLE handle = GetClipboardData(format);
     if (!handle) {
         CloseClipboard();
         return 0;
     }
-    const char *text = static_cast<const char *>(GlobalLock(handle));
-    if (!text) {
+    void *locked = GlobalLock(handle);
+    if (!locked) {
         CloseClipboard();
         return 0;
     }
-    size_t len = boundedLen(text, buffer_len);
-    memcpy(buffer, text, len);
+    std::string bytes;
+    if (format == CF_UNICODETEXT) {
+        const wchar_t *wide_text = static_cast<const wchar_t *>(locked);
+        size_t wide_limit = GlobalSize(handle) / sizeof(wchar_t);
+        bytes = narrow(std::wstring(wide_text, boundedWideLen(wide_text, wide_limit)));
+    } else {
+        const char *data = static_cast<const char *>(locked);
+        size_t data_len = GlobalSize(handle);
+        if (data_len > 0 && data[data_len - 1] == '\0') data_len--;
+        bytes.assign(data, data_len);
+        if (format == htmlClipboardFormat()) bytes = extractHtmlClipboardFragment(bytes);
+    }
+    size_t copied = copyBytesToBuffer(buffer, buffer_len, bytes);
     GlobalUnlock(handle);
     CloseClipboard();
-    return len;
+    return copied;
 }
 
-void zero_native_windows_clipboard_write(Host *host, const char *text, size_t text_len) {
+int zero_native_windows_clipboard_write_data(Host *host, const char *mime_type, size_t mime_type_len, const char *bytes, size_t bytes_len) {
     (void)host;
-    if (!OpenClipboard(nullptr)) return;
+    UINT format = clipboardFormatForMime(mime_type, mime_type_len);
+    if (!format || (!bytes && bytes_len > 0) || !OpenClipboard(nullptr)) return 0;
     EmptyClipboard();
-    HGLOBAL handle = GlobalAlloc(GMEM_MOVEABLE, text_len + 1);
-    if (handle) {
-        char *dest = static_cast<char *>(GlobalLock(handle));
-        memcpy(dest, text, text_len);
-        dest[text_len] = '\0';
-        GlobalUnlock(handle);
-        SetClipboardData(CF_TEXT, handle);
+
+    HGLOBAL handle = nullptr;
+    if (format == CF_UNICODETEXT) {
+        std::wstring wide = widen(slice(bytes, bytes_len));
+        size_t byte_count = (wide.size() + 1) * sizeof(wchar_t);
+        handle = GlobalAlloc(GMEM_MOVEABLE, byte_count);
+        if (handle) {
+            wchar_t *dest = static_cast<wchar_t *>(GlobalLock(handle));
+            if (wide.size() > 0) memcpy(dest, wide.data(), wide.size() * sizeof(wchar_t));
+            dest[wide.size()] = L'\0';
+            GlobalUnlock(handle);
+        }
+    } else {
+        std::string payload = format == htmlClipboardFormat()
+            ? htmlClipboardPayload(slice(bytes, bytes_len))
+            : slice(bytes, bytes_len);
+        handle = GlobalAlloc(GMEM_MOVEABLE, payload.size() + 1);
+        if (handle) {
+            char *dest = static_cast<char *>(GlobalLock(handle));
+            if (payload.size() > 0) memcpy(dest, payload.data(), payload.size());
+            dest[payload.size()] = '\0';
+            GlobalUnlock(handle);
+        }
     }
+
+    int ok = 0;
+    if (handle) {
+        if (SetClipboardData(format, handle)) {
+            ok = 1;
+            handle = nullptr;
+        }
+    }
+    if (handle) GlobalFree(handle);
     CloseClipboard();
+    return ok;
 }
 
 }
