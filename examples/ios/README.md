@@ -1,6 +1,6 @@
 # iOS Example
 
-A minimal iOS mobile shell that embeds a zero-native static library from Swift. The example keeps a native UIKit header above a WKWebView workspace.
+A minimal iOS mobile shell that embeds a zero-native static library from Swift. The example keeps a native UIKit header above a WKWebView workspace and routes a native header action through the zero-native command path.
 
 UIKit owns the mobile shell layout: safe-area placement, Dynamic Type text, orientation relayout, and the `WKWebView` workspace. The zero-native runtime is driven through the C ABI from the host controller.
 
@@ -36,6 +36,7 @@ Select a simulator or device and run the `ZeroNativeIOSExample` scheme.
 
 - `viewDidLoad` creates and starts the zero-native app.
 - `viewDidLayoutSubviews` forwards the current WebView size and screen scale with `zero_native_app_resize`, then requests a frame.
+- The native Refresh button calls `zero_native_app_command("mobile.refresh")`, updates status from `zero_native_app_last_command_count`, and requests a frame.
 - Controller teardown stops and destroys the app.
 
 The generic desktop `ShellView` runtime is not mapped to UIKit yet; native mobile chrome is implemented directly in Swift in this example.

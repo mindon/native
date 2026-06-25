@@ -1,6 +1,6 @@
 # Android Example
 
-A minimal Android mobile shell that embeds a zero-native static library through JNI. The example keeps a native Android header above a WebView workspace.
+A minimal Android mobile shell that embeds a zero-native static library through JNI. The example keeps a native Android header above a WebView workspace and routes a native header action through the zero-native command path.
 
 Android views own the mobile shell layout: native header sizing, density-aware resize events, touch forwarding, and the `WebView` workspace. The zero-native runtime is driven through JNI calls into the C ABI.
 
@@ -41,6 +41,7 @@ Install on an emulator or device:
 
 - `onCreate` loads the JNI library, creates the native shell, then starts the zero-native app.
 - `surfaceChanged` forwards size, display density, and the Android `Surface`, then requests a frame.
+- The native Refresh button calls `nativeCommand("mobile.refresh")`, updates status from `zero_native_app_last_command_count`, and requests a frame.
 - `onTouchEvent` forwards pointer id, phase, position, and pressure.
 - `surfaceDestroyed` and `onDestroy` stop and destroy the app.
 

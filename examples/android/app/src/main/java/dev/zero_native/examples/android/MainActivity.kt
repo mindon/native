@@ -7,6 +7,7 @@ import android.view.MotionEvent
 import android.view.SurfaceHolder
 import android.view.SurfaceView
 import android.webkit.WebView
+import android.widget.Button
 import android.widget.FrameLayout
 import android.widget.LinearLayout
 import android.widget.TextView
@@ -37,8 +38,26 @@ class MainActivity : Activity(), SurfaceHolder.Callback {
             setTextColor(Color.rgb(95, 102, 114))
             setPadding(0, 6, 0, 0)
         }
+        val status = TextView(this).apply {
+            text = "Native commands ready"
+            textSize = 13f
+            setTextColor(Color.rgb(95, 102, 114))
+            setPadding(0, 12, 0, 0)
+        }
+        val refresh = Button(this).apply {
+            text = "Refresh"
+            setOnClickListener {
+                if (nativeApp != 0L) {
+                    val count = nativeCommand(nativeApp, "mobile.refresh")
+                    status.text = "Command $count: mobile.refresh"
+                    nativeFrame(nativeApp)
+                }
+            }
+        }
         header.addView(title)
         header.addView(subtitle)
+        header.addView(status)
+        header.addView(refresh)
 
         val webView = WebView(this).apply {
             settings.javaScriptEnabled = false
@@ -106,6 +125,7 @@ class MainActivity : Activity(), SurfaceHolder.Callback {
     external fun nativeStop(app: Long)
     external fun nativeResize(app: Long, width: Float, height: Float, scale: Float, surface: Any)
     external fun nativeTouch(app: Long, id: Long, phase: Int, x: Float, y: Float, pressure: Float)
+    external fun nativeCommand(app: Long, command: String): Int
     external fun nativeFrame(app: Long)
 
     companion object {

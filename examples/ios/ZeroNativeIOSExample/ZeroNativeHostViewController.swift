@@ -6,6 +6,7 @@ final class ZeroNativeHostViewController: UIViewController {
     private let titleLabel = UILabel()
     private let subtitleLabel = UILabel()
     private let statusLabel = UILabel()
+    private let refreshButton = UIButton(type: .system)
     private let webView = WKWebView(frame: .zero)
     private var nativeApp: UnsafeMutableRawPointer?
 
@@ -58,7 +59,11 @@ final class ZeroNativeHostViewController: UIViewController {
         statusLabel.layer.masksToBounds = true
         statusLabel.textAlignment = .center
 
-        [titleLabel, subtitleLabel, statusLabel].forEach {
+        refreshButton.setTitle("Refresh", for: .normal)
+        refreshButton.titleLabel?.font = .preferredFont(forTextStyle: .headline)
+        refreshButton.addTarget(self, action: #selector(sendRefreshCommand), for: .touchUpInside)
+
+        [titleLabel, subtitleLabel, statusLabel, refreshButton].forEach {
             $0.translatesAutoresizingMaskIntoConstraints = false
             headerView.addSubview($0)
         }
@@ -70,10 +75,24 @@ final class ZeroNativeHostViewController: UIViewController {
             statusLabel.centerYAnchor.constraint(equalTo: titleLabel.centerYAnchor),
             statusLabel.widthAnchor.constraint(greaterThanOrEqualToConstant: 112),
             statusLabel.heightAnchor.constraint(equalToConstant: 24),
+            refreshButton.trailingAnchor.constraint(equalTo: statusLabel.trailingAnchor),
+            refreshButton.topAnchor.constraint(equalTo: statusLabel.bottomAnchor, constant: 8),
             subtitleLabel.leadingAnchor.constraint(equalTo: titleLabel.leadingAnchor),
-            subtitleLabel.trailingAnchor.constraint(lessThanOrEqualTo: statusLabel.leadingAnchor, constant: -16),
+            subtitleLabel.trailingAnchor.constraint(lessThanOrEqualTo: refreshButton.leadingAnchor, constant: -16),
             subtitleLabel.topAnchor.constraint(equalTo: titleLabel.bottomAnchor, constant: 6),
         ])
+    }
+
+    @objc private func sendRefreshCommand() {
+        guard let nativeApp else { return }
+        let command = "mobile.refresh"
+        command.withCString { pointer in
+            zero_native_app_command(nativeApp, pointer, UInt(command.utf8.count))
+        }
+        let count = zero_native_app_last_command_count(nativeApp)
+        let name = String(cString: zero_native_app_last_command_name(nativeApp))
+        statusLabel.text = "\(name) #\(count)"
+        zero_native_app_frame(nativeApp)
     }
 
     override func viewDidLayoutSubviews() {

@@ -105,6 +105,10 @@ pub export fn zero_native_app_touch(app: ?*anyopaque, id: u64, phase: c_int, x: 
     embed.zero_native_app_touch(app, id, phase, x, y, pressure);
 }
 
+pub export fn zero_native_app_command(app: ?*anyopaque, name: ?[*]const u8, len: usize) void {
+    embed.zero_native_app_command(app, name, len);
+}
+
 pub export fn zero_native_app_frame(app: ?*anyopaque) void {
     embed.zero_native_app_frame(app);
 }
@@ -115,6 +119,10 @@ pub export fn zero_native_app_set_asset_root(app: ?*anyopaque, path: [*]const u8
 
 pub export fn zero_native_app_last_command_count(app: ?*anyopaque) usize {
     return embed.zero_native_app_last_command_count(app);
+}
+
+pub export fn zero_native_app_last_command_name(app: ?*anyopaque) [*:0]const u8 {
+    return embed.zero_native_app_last_command_name(app);
 }
 
 pub export fn zero_native_app_last_error_name(app: ?*anyopaque) [*:0]const u8 {
