@@ -2,6 +2,7 @@
 
 #include <gtk/gtk.h>
 #include <webkit/webkit.h>
+#include <glib/gstdio.h>
 #include <string.h>
 #include <stdlib.h>
 #include <stdio.h>
@@ -2106,6 +2107,133 @@ int zero_native_gtk_show_notification(zero_native_gtk_host_t *host, const char *
     g_application_send_notification(G_APPLICATION(host->app), NULL, notification);
     g_object_unref(notification);
     return 1;
+}
+
+static char *zero_native_recent_bookmarks_path(void) {
+    const char *data_dir = g_get_user_data_dir();
+    if (!data_dir || data_dir[0] == '\0') return NULL;
+    if (g_mkdir_with_parents(data_dir, 0700) != 0) return NULL;
+    return g_build_filename(data_dir, "recently-used.xbel", NULL);
+}
+
+static const char *zero_native_recent_app_name(zero_native_gtk_host_t *host) {
+    if (host && host->app_name && host->app_name[0] != '\0') return host->app_name;
+    const char *application_name = g_get_application_name();
+    if (application_name && application_name[0] != '\0') return application_name;
+    return "zero-native";
+}
+
+static GBookmarkFile *zero_native_load_recent_bookmarks(char **out_path) {
+    *out_path = zero_native_recent_bookmarks_path();
+    if (!*out_path) return NULL;
+
+    GBookmarkFile *bookmarks = g_bookmark_file_new();
+    if (!bookmarks) {
+        g_free(*out_path);
+        *out_path = NULL;
+        return NULL;
+    }
+
+    GError *error = NULL;
+    if (!g_bookmark_file_load_from_file(bookmarks, *out_path, &error)) {
+        gboolean missing = error && g_error_matches(error, G_FILE_ERROR, G_FILE_ERROR_NOENT);
+        if (error) g_error_free(error);
+        if (!missing) {
+            g_bookmark_file_free(bookmarks);
+            g_free(*out_path);
+            *out_path = NULL;
+            return NULL;
+        }
+    }
+
+    return bookmarks;
+}
+
+static int zero_native_write_recent_bookmarks(GBookmarkFile *bookmarks, const char *path) {
+    GError *error = NULL;
+    gboolean ok = g_bookmark_file_to_file(bookmarks, path, &error);
+    if (error) g_error_free(error);
+    return ok ? 1 : 0;
+}
+
+int zero_native_gtk_add_recent_document(zero_native_gtk_host_t *host, const char *path, size_t path_len) {
+    if (!host || !path || path_len == 0) return 0;
+    char *path_copy = zero_native_strndup(path, path_len);
+    if (!path_copy) return 0;
+
+    char *uri = g_filename_to_uri(path_copy, NULL, NULL);
+    if (!uri) {
+        free(path_copy);
+        return 0;
+    }
+
+    char *bookmarks_path = NULL;
+    GBookmarkFile *bookmarks = zero_native_load_recent_bookmarks(&bookmarks_path);
+    if (!bookmarks) {
+        g_free(uri);
+        free(path_copy);
+        return 0;
+    }
+
+    char *title = g_path_get_basename(path_copy);
+    if (title && g_utf8_validate(title, -1, NULL)) {
+        g_bookmark_file_set_title(bookmarks, uri, title);
+    }
+    g_free(title);
+
+    gboolean uncertain = FALSE;
+    char *content_type = g_content_type_guess(path_copy, NULL, 0, &uncertain);
+    (void)uncertain;
+    char *mime_type = content_type ? g_content_type_get_mime_type(content_type) : NULL;
+    g_bookmark_file_set_mime_type(bookmarks, uri, mime_type ? mime_type : "application/octet-stream");
+    g_free(mime_type);
+    g_free(content_type);
+
+    g_bookmark_file_add_application(bookmarks, uri, zero_native_recent_app_name(host), NULL);
+    int ok = zero_native_write_recent_bookmarks(bookmarks, bookmarks_path);
+
+    g_bookmark_file_free(bookmarks);
+    g_free(bookmarks_path);
+    g_free(uri);
+    free(path_copy);
+    return ok;
+}
+
+int zero_native_gtk_clear_recent_documents(zero_native_gtk_host_t *host) {
+    if (!host) return 0;
+    char *bookmarks_path = NULL;
+    GBookmarkFile *bookmarks = zero_native_load_recent_bookmarks(&bookmarks_path);
+    if (!bookmarks) return 0;
+
+    const char *app_name = zero_native_recent_app_name(host);
+    gsize uri_count = 0;
+    char **uris = g_bookmark_file_get_uris(bookmarks, &uri_count);
+    int changed = 0;
+
+    for (gsize i = 0; uris && i < uri_count; i++) {
+        GError *remove_error = NULL;
+        if (g_bookmark_file_remove_application(bookmarks, uris[i], app_name, &remove_error)) {
+            changed = 1;
+
+            GError *apps_error = NULL;
+            gsize app_count = 0;
+            char **apps = g_bookmark_file_get_applications(bookmarks, uris[i], &app_count, &apps_error);
+            if (!apps_error && app_count == 0) {
+                GError *item_error = NULL;
+                (void)g_bookmark_file_remove_item(bookmarks, uris[i], &item_error);
+                if (item_error) g_error_free(item_error);
+            }
+            if (apps_error) g_error_free(apps_error);
+            g_strfreev(apps);
+        }
+        if (remove_error) g_error_free(remove_error);
+    }
+
+    g_strfreev(uris);
+    int ok = changed ? zero_native_write_recent_bookmarks(bookmarks, bookmarks_path) : 1;
+    g_bookmark_file_free(bookmarks);
+    g_free(bookmarks_path);
+    return ok;
 }
 
 typedef struct zero_native_clipboard_read_state {

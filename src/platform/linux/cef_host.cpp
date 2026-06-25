@@ -461,6 +461,18 @@ int zero_native_gtk_show_notification(Host *host, const char *title, size_t titl
     return 0;
 }
 
+int zero_native_gtk_add_recent_document(Host *host, const char *path, size_t path_len) {
+    (void)host;
+    (void)path;
+    (void)path_len;
+    return 0;
+}
+
+int zero_native_gtk_clear_recent_documents(Host *host) {
+    (void)host;
+    return 0;
+}
+
 size_t zero_native_gtk_clipboard_read(Host *host, char *buffer, size_t buffer_len) {
     (void)host;
     (void)buffer;

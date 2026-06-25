@@ -129,6 +129,8 @@ int zero_native_gtk_close_webview(zero_native_gtk_host_t *host, uint64_t window_
 int zero_native_gtk_open_external_url(zero_native_gtk_host_t *host, const char *url, size_t url_len);
 int zero_native_gtk_reveal_path(zero_native_gtk_host_t *host, const char *path, size_t path_len);
 int zero_native_gtk_show_notification(zero_native_gtk_host_t *host, const char *title, size_t title_len, const char *subtitle, size_t subtitle_len, const char *body, size_t body_len);
+int zero_native_gtk_add_recent_document(zero_native_gtk_host_t *host, const char *path, size_t path_len);
+int zero_native_gtk_clear_recent_documents(zero_native_gtk_host_t *host);
 size_t zero_native_gtk_clipboard_read(zero_native_gtk_host_t *host, char *buffer, size_t buffer_len);
 void zero_native_gtk_clipboard_write(zero_native_gtk_host_t *host, const char *text, size_t text_len);
 size_t zero_native_gtk_clipboard_read_data(zero_native_gtk_host_t *host, const char *mime_type, size_t mime_type_len, char *buffer, size_t buffer_len);

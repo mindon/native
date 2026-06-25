@@ -95,6 +95,8 @@ extern fn zero_native_gtk_close_webview(host: *GtkHost, window_id: u64, label: [
 extern fn zero_native_gtk_open_external_url(host: *GtkHost, url: [*]const u8, url_len: usize) c_int;
 extern fn zero_native_gtk_reveal_path(host: *GtkHost, path: [*]const u8, path_len: usize) c_int;
 extern fn zero_native_gtk_show_notification(host: *GtkHost, title: [*]const u8, title_len: usize, subtitle: [*]const u8, subtitle_len: usize, body: [*]const u8, body_len: usize) c_int;
+extern fn zero_native_gtk_add_recent_document(host: *GtkHost, path: [*]const u8, path_len: usize) c_int;
+extern fn zero_native_gtk_clear_recent_documents(host: *GtkHost) c_int;
 extern fn zero_native_gtk_clipboard_read(host: *GtkHost, buffer: [*]u8, buffer_len: usize) usize;
 extern fn zero_native_gtk_clipboard_write(host: *GtkHost, text: [*]const u8, text_len: usize) void;
 extern fn zero_native_gtk_clipboard_read_data(host: *GtkHost, mime_type: [*]const u8, mime_type_len: usize, buffer: [*]u8, buffer_len: usize) usize;
@@ -221,6 +223,8 @@ pub const LinuxPlatform = struct {
                 .open_external_url_fn = openExternalUrl,
                 .reveal_path_fn = revealPath,
                 .show_notification_fn = showNotification,
+                .add_recent_document_fn = addRecentDocument,
+                .clear_recent_documents_fn = clearRecentDocuments,
                 .create_tray_fn = createTray,
                 .update_tray_menu_fn = updateTrayMenu,
                 .remove_tray_fn = removeTray,
@@ -653,6 +657,18 @@ fn showNotification(context: ?*anyopaque, options: platform_mod.NotificationOpti
         options.body.ptr,
         options.body.len,
     ) == 0) return error.UnsupportedService;
+}
+
+fn addRecentDocument(context: ?*anyopaque, path: []const u8) anyerror!void {
+    const self: *LinuxPlatform = @ptrCast(@alignCast(context.?));
+    if (self.web_engine != .system) return error.UnsupportedService;
+    if (zero_native_gtk_add_recent_document(self.host, path.ptr, path.len) == 0) return error.UnsupportedService;
+}
+
+fn clearRecentDocuments(context: ?*anyopaque) anyerror!void {
+    const self: *LinuxPlatform = @ptrCast(@alignCast(context.?));
+    if (self.web_engine != .system) return error.UnsupportedService;
+    if (zero_native_gtk_clear_recent_documents(self.host) == 0) return error.UnsupportedService;
 }
 
 fn createTray(context: ?*anyopaque, options: platform_mod.TrayOptions) anyerror!void {
