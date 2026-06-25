@@ -5,6 +5,6 @@
     .version = "0.1.0",
     .platforms = .{ "ios", "android" },
     .permissions = .{},
-    .capabilities = .{ "webview", "native_module" },
+    .capabilities = .{ "webview", "native_views", "native_module" },
     .web_engine = "system",
 }
