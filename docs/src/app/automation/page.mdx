@@ -129,6 +129,11 @@ zero-native automate reload
 # Resize the main window surface
 zero-native automate resize 900 640
 
+# Dispatch command-source events
+zero-native automate menu-command app.refresh
+zero-native automate native-command app.refresh refresh-button
+zero-native automate shortcut app.refresh
+
 # Send a bridge command and get the response
 zero-native automate bridge '{"id":"1","command":"native.ping","payload":{"source":"automation"}}'
 ```
@@ -140,7 +145,7 @@ The WebView and native-shell smoke build steps demonstrate full automation test 
 1. Build and start the app with `-Dautomation=true`
 2. Run `zero-native automate wait` to block until the app is ready
 3. Run `zero-native automate snapshot` to verify window, source, and native/WebView metadata
-4. Run `zero-native automate resize ...`, `zero-native automate bridge '...'`, or write command-source actions to `command.txt`
+4. Run `zero-native automate resize ...`, `zero-native automate bridge '...'`, or command-source actions such as `zero-native automate native-command ...`
 5. Verify bridge responses, relayout bounds, and updated snapshots
 
 ```bash
