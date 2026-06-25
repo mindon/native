@@ -808,6 +808,7 @@ fn parseViewKind(value: []const u8) !app_manifest.ViewKind {
     if (std.mem.eql(u8, value, "label")) return .label;
     if (std.mem.eql(u8, value, "spacer")) return .spacer;
     if (std.mem.eql(u8, value, "gpu_surface")) return .gpu_surface;
+    if (std.mem.eql(u8, value, "progress_indicator")) return .progress_indicator;
     return error.InvalidViewKind;
 }
 
@@ -963,6 +964,7 @@ test "manifest metadata parser reads shell windows and views" {
         \\          .{ .label = "content", .kind = "webview", .url = "zero://app/index.html", .fill = true },
         \\          .{ .label = "status", .kind = "statusbar", .edge = "bottom", .height = 24, .text = "Ready" },
         \\          .{ .label = "save", .kind = "button", .parent = "toolbar", .text = "Save", .command = "app.save" },
+        \\          .{ .label = "syncing", .kind = "progress_indicator", .parent = "toolbar", .role = "Syncing" },
         \\        },
         \\      },
         \\    },
@@ -977,10 +979,12 @@ test "manifest metadata parser reads shell windows and views" {
     try std.testing.expectEqualStrings("zero://app/index.html", metadata.shell.windows[0].views[1].url.?);
     try std.testing.expect(metadata.shell.windows[0].views[1].fill);
     try std.testing.expectEqualStrings("app.save", metadata.shell.windows[0].views[3].command.?);
+    try std.testing.expectEqualStrings("progress_indicator", metadata.shell.windows[0].views[4].kind);
 
     const shell = try parseShell(std.testing.allocator, metadata.shell);
     defer deinitParsedShell(std.testing.allocator, shell);
     try std.testing.expectEqual(app_manifest.ViewKind.webview, shell.windows[0].views[1].kind);
+    try std.testing.expectEqual(app_manifest.ViewKind.progress_indicator, shell.windows[0].views[4].kind);
     try std.testing.expectEqual(app_manifest.ShellEdge.top, shell.windows[0].views[0].edge.?);
     try app_manifest.validateManifest(.{
         .identity = .{ .id = metadata.id, .name = metadata.name },
