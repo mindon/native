@@ -90,6 +90,20 @@ zero-native capabilities are native OS services and app events exposed through `
 
 Unsupported platform hosts reject with the standard unsupported-service error.
 
+## Support discovery
+
+Use `runtime.supports(...)` before native code shows optional affordances. Trusted WebView code can make the same check with `zero-native.platform.supports` when that built-in command is explicitly allowed:
+
+```javascript
+const support = {
+  notifications: await window.zero.platform.supports("notifications"),
+  dialogs: await window.zero.platform.supports("dialogs"),
+  clipboardRichData: await window.zero.platform.supports("clipboard_rich_data"),
+  credentials: await window.zero.platform.supports("credentials"),
+  fileDrops: await window.zero.platform.supports("file_drops"),
+};
+```
+
 ## Security
 
 OS bridge commands are default-deny. Add explicit `builtin_bridge` entries for each command your app calls:
@@ -98,6 +112,7 @@ OS bridge commands are default-deny. Add explicit `builtin_bridge` entries for e
 .builtin_bridge = .{
     .enabled = true,
     .commands = &.{
+        .{ .name = "zero-native.platform.supports", .permissions = .{ "window" }, .origins = .{ "zero://app" } },
         .{ .name = "zero-native.os.openUrl", .permissions = .{ "network" }, .origins = .{ "zero://app" } },
         .{ .name = "zero-native.os.showNotification", .permissions = .{ "notifications" }, .origins = .{ "zero://app" } },
         .{ .name = "zero-native.dialog.openFile", .permissions = .{ "dialog" }, .origins = .{ "zero://app" } },

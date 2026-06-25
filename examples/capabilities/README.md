@@ -2,6 +2,7 @@
 
 This example shows guarded OS capabilities from trusted WebView code:
 
+- Platform support discovery.
 - Notifications.
 - Clipboard text read and write.
 - Message dialogs.
