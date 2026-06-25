@@ -31,7 +31,7 @@
                 .restore_policy = "center_on_primary",
                 .views = .{
                     .{ .label = "toolbar", .kind = "toolbar", .edge = "top", .height = 48, .role = "Toolbar" },
-                    .{ .label = "sync-button", .kind = "button", .parent = "toolbar", .x = 12, .y = 9, .width = 92, .height = 30, .text = "Sync", .command = "app.sync" },
+                    .{ .label = "sync-button", .kind = "button", .parent = "toolbar", .x = 12, .y = 9, .width = 92, .height = 30, .accessibility_label = "Sync now", .text = "Sync", .command = "app.sync" },
                     .{ .label = "main", .kind = "webview", .url = "zero://inline", .fill = true },
                     .{ .label = "statusbar", .kind = "statusbar", .edge = "bottom", .height = 34, .role = "Status" },
                     .{ .label = "status-label", .kind = "label", .parent = "statusbar", .x = 14, .y = 8, .width = 520, .height = 18, .text = "Ready. Use the toolbar, menu, tray, shortcut, or WebView button." },

@@ -131,7 +131,7 @@ const shell_views = [_]zero_native.ShellView{
     .{ .label = "view-mode", .kind = .segmented_control, .parent = "filters", .width = 172, .height = 30, .layer = 12, .text = "All|Open|Done" },
     .{ .label = "live-filter", .kind = .checkbox, .parent = "filters", .width = 160, .height = 24, .layer = 12, .text = "Live filters" },
     .{ .label = "preview-toggle", .kind = .toggle, .parent = "filters", .width = 140, .height = 28, .layer = 12, .text = "Preview" },
-    .{ .label = "apply-filter", .kind = .button, .parent = "filters", .width = 92, .height = 30, .layer = 12, .text = "Apply", .command = apply_command },
+    .{ .label = "apply-filter", .kind = .button, .parent = "filters", .width = 92, .height = 30, .layer = 12, .accessibility_label = "Apply filters", .text = "Apply", .command = apply_command },
     .{ .label = "main", .kind = .webview, .parent = "body", .url = "zero://inline", .fill = true },
     .{ .label = "statusbar", .kind = .statusbar, .edge = .bottom, .height = statusbar_height, .layer = 20, .role = "Status" },
     .{ .label = "status-label", .kind = .label, .parent = "statusbar", .x = 14, .y = 8, .width = 560, .height = 18, .layer = 21, .text = "Ready." },

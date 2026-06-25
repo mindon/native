@@ -377,6 +377,9 @@ pub const Runtime = struct {
         if (patch.role) |role| {
             if (role.len > platform.max_view_role_bytes) return error.ViewRoleTooLarge;
         }
+        if (patch.accessibility_label) |accessibility_label| {
+            if (accessibility_label.len > platform.max_view_accessibility_label_bytes) return error.ViewAccessibilityLabelTooLarge;
+        }
         if (patch.text) |text| {
             if (text.len > platform.max_view_text_bytes) return error.ViewTextTooLarge;
         }
@@ -396,6 +399,7 @@ pub const Runtime = struct {
         if (patch.visible) |visible| self.views[index].visible = visible;
         if (patch.enabled) |enabled| self.views[index].enabled = enabled;
         if (patch.role) |role| self.views[index].role = try copyInto(&self.views[index].role_storage, role);
+        if (patch.accessibility_label) |accessibility_label| self.views[index].accessibility_label = try copyInto(&self.views[index].accessibility_label_storage, accessibility_label);
         if (patch.text) |text| self.views[index].text = try copyInto(&self.views[index].text_storage, text);
         if (patch.command) |command| self.views[index].command = try copyInto(&self.views[index].command_storage, command);
         self.invalidateFor(.command, patch.frame);
@@ -1632,13 +1636,14 @@ pub const Runtime = struct {
     }
 
     fn createViewFromJson(self: *Runtime, payload: []const u8, source_window_id: platform.WindowId, output: []u8) ![]const u8 {
-        var scratch: [platform.max_view_label_bytes * 2 + platform.max_view_role_bytes + platform.max_view_text_bytes + platform.max_view_command_bytes + platform.max_webview_url_bytes]u8 = undefined;
+        var scratch: [platform.max_view_label_bytes * 2 + platform.max_view_role_bytes + platform.max_view_accessibility_label_bytes + platform.max_view_text_bytes + platform.max_view_command_bytes + platform.max_webview_url_bytes]u8 = undefined;
         var storage = json.StringStorage.init(&scratch);
         const label = jsonStringField(payload, "label", &storage) orelse return error.InvalidViewOptions;
         const kind_str = jsonStringField(payload, "kind", &storage) orelse return error.InvalidViewOptions;
         const kind = viewKindFromString(kind_str) orelse return error.UnsupportedViewKind;
         const window_id = try viewWindowIdFromJson(payload, source_window_id);
         const role = jsonStringField(payload, "role", &storage) orelse "";
+        const accessibility_label = jsonStringField(payload, "accessibilityLabel", &storage) orelse jsonStringField(payload, "accessibility_label", &storage) orelse "";
         const text = jsonStringField(payload, "text", &storage) orelse "";
         const command = jsonStringField(payload, "command", &storage) orelse "";
         const parent = jsonStringField(payload, "parent", &storage);
@@ -1653,6 +1658,7 @@ pub const Runtime = struct {
             .visible = jsonBoolField(payload, "visible") orelse true,
             .enabled = jsonBoolField(payload, "enabled") orelse true,
             .role = role,
+            .accessibility_label = accessibility_label,
             .text = text,
             .command = command,
             .url = url,
@@ -1663,7 +1669,7 @@ pub const Runtime = struct {
     }
 
     fn updateViewFromJson(self: *Runtime, payload: []const u8, source_window_id: platform.WindowId, output: []u8) ![]const u8 {
-        var scratch: [platform.max_view_label_bytes + platform.max_view_role_bytes + platform.max_view_text_bytes + platform.max_view_command_bytes + platform.max_webview_url_bytes]u8 = undefined;
+        var scratch: [platform.max_view_label_bytes + platform.max_view_role_bytes + platform.max_view_accessibility_label_bytes + platform.max_view_text_bytes + platform.max_view_command_bytes + platform.max_webview_url_bytes]u8 = undefined;
         var storage = json.StringStorage.init(&scratch);
         const label = jsonStringField(payload, "label", &storage) orelse return error.InvalidViewOptions;
         const window_id = try viewWindowIdFromJson(payload, source_window_id);
@@ -1673,6 +1679,7 @@ pub const Runtime = struct {
             .visible = jsonBoolField(payload, "visible"),
             .enabled = jsonBoolField(payload, "enabled"),
             .role = jsonStringField(payload, "role", &storage),
+            .accessibility_label = jsonStringField(payload, "accessibilityLabel", &storage) orelse jsonStringField(payload, "accessibility_label", &storage),
             .text = jsonStringField(payload, "text", &storage),
             .command = jsonStringField(payload, "command", &storage),
             .url = jsonStringField(payload, "url", &storage),
@@ -2008,7 +2015,7 @@ pub const Runtime = struct {
     }
 
     fn updateWebViewView(self: *Runtime, window_id: platform.WindowId, label: []const u8, patch: platform.ViewPatch) !platform.ViewInfo {
-        if (patch.visible != null or patch.enabled != null or patch.role != null or patch.text != null or patch.command != null) return error.InvalidViewOptions;
+        if (patch.visible != null or patch.enabled != null or patch.role != null or patch.accessibility_label != null or patch.text != null or patch.command != null) return error.InvalidViewOptions;
         if (isMainWebViewLabel(label)) {
             const window_index = self.findWindowIndexById(window_id) orelse return error.WindowNotFound;
             if (patch.url != null) return error.InvalidViewOptions;
@@ -2071,6 +2078,7 @@ pub const Runtime = struct {
         self.views[index].label = try copyInto(&self.views[index].label_storage, options.label);
         self.views[index].parent = if (options.parent) |parent| try copyInto(&self.views[index].parent_storage, parent) else null;
         self.views[index].role = try copyInto(&self.views[index].role_storage, options.role);
+        self.views[index].accessibility_label = try copyInto(&self.views[index].accessibility_label_storage, options.accessibility_label);
         self.views[index].text = try copyInto(&self.views[index].text_storage, options.text);
         self.views[index].command = try copyInto(&self.views[index].command_storage, options.command);
         self.view_count += 1;
@@ -2140,12 +2148,14 @@ pub const Runtime = struct {
                 .enabled = next.enabled,
                 .transparent = next.transparent,
                 .bridge_enabled = next.bridge_enabled,
+                .accessibility_label = next.accessibility_label,
                 .focused = next.focused,
                 .open = next.open,
             };
             self.views[cursor].label = copyInto(&self.views[cursor].label_storage, next.label) catch unreachable;
             self.views[cursor].parent = if (next.parent) |parent| copyInto(&self.views[cursor].parent_storage, parent) catch unreachable else null;
             self.views[cursor].role = copyInto(&self.views[cursor].role_storage, next.role) catch unreachable;
+            self.views[cursor].accessibility_label = copyInto(&self.views[cursor].accessibility_label_storage, next.accessibility_label) catch unreachable;
             self.views[cursor].text = copyInto(&self.views[cursor].text_storage, next.text) catch unreachable;
             self.views[cursor].command = copyInto(&self.views[cursor].command_storage, next.command) catch unreachable;
         }
@@ -2290,6 +2300,7 @@ const RuntimeView = struct {
     visible: bool = true,
     enabled: bool = true,
     role: []const u8 = "",
+    accessibility_label: []const u8 = "",
     text: []const u8 = "",
     command: []const u8 = "",
     transparent: bool = false,
@@ -2299,6 +2310,7 @@ const RuntimeView = struct {
     label_storage: [platform.max_view_label_bytes]u8 = undefined,
     parent_storage: [platform.max_view_label_bytes]u8 = undefined,
     role_storage: [platform.max_view_role_bytes]u8 = undefined,
+    accessibility_label_storage: [platform.max_view_accessibility_label_bytes]u8 = undefined,
     text_storage: [platform.max_view_text_bytes]u8 = undefined,
     command_storage: [platform.max_view_command_bytes]u8 = undefined,
 
@@ -2313,6 +2325,7 @@ const RuntimeView = struct {
             .visible = self.visible,
             .enabled = self.enabled,
             .role = self.role,
+            .accessibility_label = self.accessibility_label,
             .text = self.text,
             .command = self.command,
             .url = "",
@@ -2507,6 +2520,7 @@ fn shellViewOptions(window_id: platform.WindowId, view: app_manifest.ShellView, 
         .visible = view.visible,
         .enabled = view.enabled,
         .role = view.role orelse "",
+        .accessibility_label = view.accessibility_label orelse "",
         .text = view.text orelse view.role orelse "",
         .command = view.command orelse "",
         .url = view.url orelse "",
@@ -2771,6 +2785,8 @@ fn writeViewJsonToWriter(view: platform.ViewInfo, writer: anytype) !void {
     }
     try writer.writeAll(",\"role\":");
     try json.writeString(writer, view.role);
+    try writer.writeAll(",\"accessibilityLabel\":");
+    try json.writeString(writer, view.accessibility_label);
     try writer.writeAll(",\"text\":");
     try json.writeString(writer, view.text);
     try writer.writeAll(",\"command\":");
@@ -2803,6 +2819,7 @@ fn viewInfoFromWebView(webview: RuntimeWebView) platform.ViewInfo {
         .visible = webview.open,
         .enabled = true,
         .role = "webview",
+        .accessibility_label = "WebView",
         .url = webview.url,
         .transparent = webview.transparent,
         .bridge_enabled = webview.bridge_enabled,
@@ -2905,6 +2922,7 @@ fn builtinBridgeErrorMessage(err: anyerror) []const u8 {
         error.DuplicateViewLabel => "View label already exists",
         error.ViewLabelTooLarge => "View label is too large",
         error.ViewRoleTooLarge => "View role is too large",
+        error.ViewAccessibilityLabelTooLarge => "View accessibility label is too large",
         error.ViewTextTooLarge => "View text is too large",
         error.UnsupportedViewKind => "This backend does not support this native view kind yet",
         error.UnsupportedViewFocus => "This backend does not support focusing this native view yet",
@@ -2941,6 +2959,7 @@ fn builtinBridgeErrorCode(err: anyerror) bridge.ErrorCode {
         error.DuplicateViewLabel,
         error.ViewLabelTooLarge,
         error.ViewRoleTooLarge,
+        error.ViewAccessibilityLabelTooLarge,
         error.ViewTextTooLarge,
         error.UnsupportedViewKind,
         error.UnsupportedViewFocus,
@@ -3243,6 +3262,7 @@ fn validateViewOptions(options: platform.ViewOptions) !void {
         if (parent.len == 0 or parent.len > platform.max_view_label_bytes) return error.InvalidViewOptions;
     }
     if (options.role.len > platform.max_view_role_bytes) return error.ViewRoleTooLarge;
+    if (options.accessibility_label.len > platform.max_view_accessibility_label_bytes) return error.ViewAccessibilityLabelTooLarge;
     if (options.text.len > platform.max_view_text_bytes) return error.ViewTextTooLarge;
     if (options.command.len > 0) try validateCommandName(options.command);
     if (options.kind != .webview and options.url.len > 0) return error.InvalidViewOptions;
@@ -3408,11 +3428,13 @@ test "runtime exposes startup WebView and native views through generic view API"
         .kind = .toolbar,
         .frame = geometry.RectF.init(0, 0, 640, 44),
         .role = "toolbar",
+        .accessibility_label = "Main toolbar",
         .text = "Tools",
         .command = "app.toolbar",
     });
     try std.testing.expectEqual(platform.ViewKind.toolbar, toolbar.kind);
     try std.testing.expectEqualStrings("toolbar", toolbar.label);
+    try std.testing.expectEqualStrings("Main toolbar", toolbar.accessibility_label);
     try std.testing.expectEqualStrings("Tools", toolbar.text);
     try std.testing.expectEqualStrings("app.toolbar", toolbar.command);
 
@@ -3434,12 +3456,14 @@ test "runtime exposes startup WebView and native views through generic view API"
     const updated = try harness.runtime.updateView(1, "toolbar", .{
         .frame = geometry.RectF.init(0, 0, 640, 52),
         .visible = false,
+        .accessibility_label = "Primary actions toolbar",
         .text = "Actions",
         .command = "app.toolbar.updated",
     });
     try std.testing.expectEqual(@as(f32, 52), updated.frame.height);
     try std.testing.expect(!updated.visible);
     try std.testing.expect(updated.focused);
+    try std.testing.expectEqualStrings("Primary actions toolbar", updated.accessibility_label);
     try std.testing.expectEqualStrings("Actions", updated.text);
     try std.testing.expectEqualStrings("app.toolbar.updated", updated.command);
 
@@ -3500,7 +3524,7 @@ test "runtime materializes manifest shell windows into laid out views" {
     };
 
     const shell_views = [_]app_manifest.ShellView{
-        .{ .label = "refresh-button", .kind = .button, .parent = "toolbar", .text = "Refresh", .command = "app.refresh" },
+        .{ .label = "refresh-button", .kind = .button, .parent = "toolbar", .accessibility_label = "Refresh workspace", .text = "Refresh", .command = "app.refresh" },
         .{ .label = "toolbar-search", .kind = .search_field, .parent = "toolbar", .text = "Search" },
         .{ .label = "toolbar-progress", .kind = .progress_indicator, .parent = "toolbar", .role = "Syncing" },
         .{ .label = "toolbar-mode", .kind = .segmented_control, .parent = "toolbar", .text = "List|Grid", .command = "app.view.mode" },
@@ -3552,6 +3576,7 @@ test "runtime materializes manifest shell windows into laid out views" {
 
     try std.testing.expectEqual(platform.ViewKind.button, refresh.kind);
     try std.testing.expectEqualStrings("toolbar", refresh.parent.?);
+    try std.testing.expectEqualStrings("Refresh workspace", refresh.accessibility_label);
     try std.testing.expectEqualStrings("Refresh", refresh.text);
     try std.testing.expectEqualStrings("app.refresh", refresh.command);
     try std.testing.expectEqual(@as(f32, 8), refresh.frame.x);
@@ -4934,15 +4959,17 @@ test "runtime handles built-in JavaScript view bridge commands" {
     try harness.start(app_state.app());
 
     try harness.runtime.dispatchPlatformEvent(app_state.app(), .{ .bridge_message = .{
-        .bytes = "{\"id\":\"1\",\"command\":\"zero-native.view.create\",\"payload\":{\"label\":\"toolbar\",\"kind\":\"toolbar\",\"frame\":{\"x\":0,\"y\":0,\"width\":640,\"height\":44},\"role\":\"toolbar\",\"text\":\"Tools\",\"command\":\"app.tools\",\"layer\":3}}",
+        .bytes = "{\"id\":\"1\",\"command\":\"zero-native.view.create\",\"payload\":{\"label\":\"toolbar\",\"kind\":\"toolbar\",\"frame\":{\"x\":0,\"y\":0,\"width\":640,\"height\":44},\"role\":\"toolbar\",\"accessibilityLabel\":\"Main tools\",\"text\":\"Tools\",\"command\":\"app.tools\",\"layer\":3}}",
         .origin = "zero://inline",
         .window_id = 1,
     } });
     try std.testing.expect(std.mem.indexOf(u8, harness.null_platform.lastBridgeResponse(), "\"ok\":true") != null);
     try std.testing.expect(std.mem.indexOf(u8, harness.null_platform.lastBridgeResponse(), "\"kind\":\"toolbar\"") != null);
+    try std.testing.expect(std.mem.indexOf(u8, harness.null_platform.lastBridgeResponse(), "\"accessibilityLabel\":\"Main tools\"") != null);
     try std.testing.expect(std.mem.indexOf(u8, harness.null_platform.lastBridgeResponse(), "\"text\":\"Tools\"") != null);
     try std.testing.expect(std.mem.indexOf(u8, harness.null_platform.lastBridgeResponse(), "\"command\":\"app.tools\"") != null);
     try std.testing.expectEqual(@as(usize, 1), harness.runtime.view_count);
+    try std.testing.expectEqualStrings("Main tools", harness.null_platform.views[0].accessibility_label);
     try std.testing.expectEqualStrings("app.tools", harness.null_platform.views[0].command);
 
     try harness.runtime.dispatchPlatformEvent(app_state.app(), .{ .native_command = .{
@@ -4986,14 +5013,16 @@ test "runtime handles built-in JavaScript view bridge commands" {
     try std.testing.expect(std.mem.indexOf(u8, harness.null_platform.lastBridgeResponse(), "\"visible\":false") != null);
 
     try harness.runtime.dispatchPlatformEvent(app_state.app(), .{ .bridge_message = .{
-        .bytes = "{\"id\":\"6\",\"command\":\"zero-native.view.update\",\"payload\":{\"label\":\"toolbar\",\"visible\":true,\"enabled\":false,\"role\":\"banner\",\"text\":\"Actions\",\"command\":\"app.actions\"}}",
+        .bytes = "{\"id\":\"6\",\"command\":\"zero-native.view.update\",\"payload\":{\"label\":\"toolbar\",\"visible\":true,\"enabled\":false,\"role\":\"banner\",\"accessibilityLabel\":\"Primary actions\",\"text\":\"Actions\",\"command\":\"app.actions\"}}",
         .origin = "zero://inline",
         .window_id = 1,
     } });
     try std.testing.expect(std.mem.indexOf(u8, harness.null_platform.lastBridgeResponse(), "\"enabled\":false") != null);
     try std.testing.expect(std.mem.indexOf(u8, harness.null_platform.lastBridgeResponse(), "\"role\":\"banner\"") != null);
+    try std.testing.expect(std.mem.indexOf(u8, harness.null_platform.lastBridgeResponse(), "\"accessibilityLabel\":\"Primary actions\"") != null);
     try std.testing.expect(std.mem.indexOf(u8, harness.null_platform.lastBridgeResponse(), "\"text\":\"Actions\"") != null);
     try std.testing.expect(std.mem.indexOf(u8, harness.null_platform.lastBridgeResponse(), "\"command\":\"app.actions\"") != null);
+    try std.testing.expectEqualStrings("Primary actions", harness.null_platform.views[0].accessibility_label);
     try std.testing.expectEqualStrings("app.actions", harness.null_platform.views[0].command);
 
     try harness.runtime.dispatchPlatformEvent(app_state.app(), .{ .bridge_message = .{

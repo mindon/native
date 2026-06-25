@@ -35,6 +35,7 @@ pub const max_shell_windows: usize = 16;
 pub const max_shell_views_per_window: usize = 128;
 pub const max_view_label_bytes: usize = 96;
 pub const max_view_role_bytes: usize = 64;
+pub const max_view_accessibility_label_bytes: usize = 256;
 pub const max_command_id_bytes: usize = 128;
 pub const max_commands: usize = 256;
 pub const max_command_title_bytes: usize = 128;
@@ -315,6 +316,7 @@ pub const ShellView = struct {
     visible: bool = true,
     enabled: bool = true,
     role: ?[]const u8 = null,
+    accessibility_label: ?[]const u8 = null,
     url: ?[]const u8 = null,
     text: ?[]const u8 = null,
     command: ?[]const u8 = null,
@@ -522,6 +524,10 @@ fn validateShellViews(views: []const ShellView) ValidationError!void {
         if (view.role) |role| {
             if (role.len > max_view_role_bytes) return error.InvalidName;
             try validateName(role);
+        }
+        if (view.accessibility_label) |accessibility_label| {
+            if (accessibility_label.len > max_view_accessibility_label_bytes) return error.InvalidName;
+            try validateFreeText(accessibility_label);
         }
         if (view.text) |text| try validateFreeText(text);
         if (view.command) |command| {
@@ -1065,7 +1071,7 @@ test "manifest validates shell windows and views" {
         .{ .label = "toolbar", .kind = .toolbar, .edge = .top, .height = 44, .role = "toolbar" },
         .{ .label = "content", .kind = .webview, .url = "zero://app/index.html", .fill = true },
         .{ .label = "status", .kind = .statusbar, .edge = .bottom, .height = 24, .text = "Ready" },
-        .{ .label = "save", .kind = .button, .parent = "toolbar", .text = "Save", .command = "app.save" },
+        .{ .label = "save", .kind = .button, .parent = "toolbar", .accessibility_label = "Save document", .text = "Save", .command = "app.save" },
     };
     const shell_windows = [_]ShellWindow{.{
         .label = "main",

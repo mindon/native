@@ -164,6 +164,7 @@ export interface ZeroNativeViewInfo {
   kind: ZeroNativeViewKind;
   parent: string | null;
   role: string;
+  accessibilityLabel: string;
   text: string;
   url: string;
   x: number;
@@ -189,8 +190,10 @@ export interface ZeroNativeCreateViewOptions {
   layer?: number;
   visible?: boolean;
   enabled?: boolean;
-  /** Accessibility or semantic role/label. Use text for visible titles and placeholders. */
+  /** Semantic role or fallback accessibility text. Use text for visible titles and placeholders. */
   role?: string;
+  /** Accessibility label announced for the native control without changing visible text. */
+  accessibilityLabel?: string;
   /** Visible native control label, button title, or text/search placeholder. */
   text?: string;
   command?: string;
@@ -207,8 +210,10 @@ export interface ZeroNativeUpdateViewOptions {
   layer?: number;
   visible?: boolean;
   enabled?: boolean;
-  /** Accessibility or semantic role/label. Use text for visible titles and placeholders. */
+  /** Semantic role or fallback accessibility text. Use text for visible titles and placeholders. */
   role?: string;
+  /** Accessibility label announced for the native control without changing visible text. */
+  accessibilityLabel?: string;
   /** Visible native control label, button title, or text/search placeholder. */
   text?: string;
   command?: string;

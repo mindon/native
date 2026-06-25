@@ -19,7 +19,7 @@ Use `App.scene_fn` when a window should start with native structure around WebVi
 ```zig
 const shell_views = [_]zero_native.ShellView{
     .{ .label = "toolbar", .kind = .toolbar, .edge = .top, .height = 52 },
-    .{ .label = "refresh", .kind = .button, .parent = "toolbar", .text = "Refresh", .command = "app.refresh" },
+    .{ .label = "refresh", .kind = .button, .parent = "toolbar", .accessibility_label = "Refresh workspace", .text = "Refresh", .command = "app.refresh" },
     .{ .label = "body", .kind = .split, .fill = true, .axis = .row },
     .{ .label = "sidebar", .kind = .sidebar, .parent = "body", .width = 240 },
     .{ .label = "main", .kind = .webview, .parent = "body", .url = "zero://inline", .fill = true },
@@ -47,6 +47,7 @@ const info = try runtime.createView(.{
     .label = "sync-status",
     .kind = .label,
     .parent = "status",
+    .accessibility_label = "Sync status",
     .text = "Syncing",
 });
 

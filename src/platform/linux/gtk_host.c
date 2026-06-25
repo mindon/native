@@ -68,6 +68,7 @@ typedef struct zero_native_gtk_native_view {
     char *label;
     char *parent;
     char *role;
+    char *accessibility_label;
     char *text;
     char *command;
     GtkWidget *widget;
@@ -298,6 +299,14 @@ static const char *zero_native_native_display_text(zero_native_gtk_native_view_t
     return view->label ? view->label : "";
 }
 
+static const char *zero_native_native_accessibility_label(zero_native_gtk_native_view_t *view) {
+    if (!view) return "";
+    if (view->accessibility_label && view->accessibility_label[0]) return view->accessibility_label;
+    if (view->role && view->role[0]) return view->role;
+    if (view->text && view->text[0]) return view->text;
+    return view->label ? view->label : "";
+}
+
 static zero_native_gtk_native_view_t *zero_native_find_native_view(zero_native_gtk_window_t *win, const char *label) {
     if (!win || !label) return NULL;
     for (int i = 0; i < ZERO_NATIVE_MAX_NATIVE_VIEWS; i++) {
@@ -439,6 +448,7 @@ static void zero_native_apply_native_view_state(zero_native_gtk_native_view_t *v
     gtk_widget_set_visible(view->widget, view->visible != 0);
     gtk_widget_set_sensitive(view->widget, view->enabled != 0);
     if (update_text) zero_native_apply_native_view_text(view, text);
+    gtk_accessible_update_property(GTK_ACCESSIBLE(view->widget), GTK_ACCESSIBLE_PROPERTY_LABEL, zero_native_native_accessibility_label(view), -1);
 }
 
 static void zero_native_emit_native_action(GtkWidget *widget, gpointer data) {
@@ -564,6 +574,7 @@ static void zero_native_clear_native_view(zero_native_gtk_window_t *win, zero_na
     free(view->label);
     free(view->parent);
     free(view->role);
+    free(view->accessibility_label);
     free(view->text);
     free(view->command);
     memset(view, 0, sizeof(*view));
@@ -709,8 +720,8 @@ static const char *zero_native_bridge_script(void) {
         "function webviewHandle(info){return Object.freeze(Object.assign({},info,{setFrame:function(frame){return webviews.setFrame({label:info.label,windowId:info.windowId,frame:frame});},navigate:function(url){return webviews.navigate({label:info.label,windowId:info.windowId,url:url});},setZoom:function(zoom){return webviews.setZoom({label:info.label,windowId:info.windowId,zoom:zoom});},setLayer:function(layer){return webviews.setLayer({label:info.label,windowId:info.windowId,layer:layer});},close:function(){return webviews.close({label:info.label,windowId:info.windowId});}}));}"
         "function validateViewSelector(options){options=options||{};ensureString(options.label,'label');if(options.windowId!=null&&(typeof options.windowId!=='number'||!isFinite(options.windowId)||options.windowId<0||Math.floor(options.windowId)!==options.windowId)){throw new TypeError('windowId must be a non-negative integer');}}"
         "function optionalFramePayload(options){var frame=options.frame||((options.x!=null||options.y!=null||options.width!=null||options.height!=null)?options:null);if(!frame){return null;}return {x:frame.x==null?0:ensureNumber(frame.x,'frame.x'),y:frame.y==null?0:ensureNumber(frame.y,'frame.y'),width:ensureNumber(frame.width,'frame.width'),height:ensureNumber(frame.height,'frame.height')};}"
-        "function viewCreatePayload(options){options=options||{};validateViewSelector(options);ensureString(options.kind,'kind');var payload={label:options.label,kind:options.kind,windowId:options.windowId};var frame=optionalFramePayload(options);if(frame){payload.frame=frame;}if(options.parent!=null){payload.parent=ensureString(options.parent,'parent');}if(options.role!=null){payload.role=ensureString(options.role,'role');}if(options.text!=null){payload.text=ensureString(options.text,'text');}if(options.command!=null){payload.command=ensureString(options.command,'command');}if(options.url!=null){payload.url=ensureString(options.url,'url');}if(options.layer!=null){payload.layer=ensureNumber(options.layer,'layer');}if(options.visible!=null){payload.visible=!!options.visible;}if(options.enabled!=null){payload.enabled=!!options.enabled;}if(options.transparent!=null){payload.transparent=!!options.transparent;}if(options.bridge!=null){payload.bridge=!!options.bridge;}return payload;}"
-        "function viewPatchPayload(options){options=options||{};validateViewSelector(options);var payload={label:options.label,windowId:options.windowId};var frame=optionalFramePayload(options);if(frame){payload.frame=frame;}if(options.layer!=null){payload.layer=ensureNumber(options.layer,'layer');}if(options.visible!=null){payload.visible=!!options.visible;}if(options.enabled!=null){payload.enabled=!!options.enabled;}if(options.role!=null){payload.role=ensureString(options.role,'role');}if(options.text!=null){payload.text=ensureString(options.text,'text');}if(options.command!=null){payload.command=ensureString(options.command,'command');}if(options.url!=null){payload.url=ensureString(options.url,'url');}return payload;}"
+        "function viewCreatePayload(options){options=options||{};validateViewSelector(options);ensureString(options.kind,'kind');var payload={label:options.label,kind:options.kind,windowId:options.windowId};var frame=optionalFramePayload(options);if(frame){payload.frame=frame;}if(options.parent!=null){payload.parent=ensureString(options.parent,'parent');}if(options.role!=null){payload.role=ensureString(options.role,'role');}if(options.accessibilityLabel!=null){payload.accessibilityLabel=ensureString(options.accessibilityLabel,'accessibilityLabel');}if(options.text!=null){payload.text=ensureString(options.text,'text');}if(options.command!=null){payload.command=ensureString(options.command,'command');}if(options.url!=null){payload.url=ensureString(options.url,'url');}if(options.layer!=null){payload.layer=ensureNumber(options.layer,'layer');}if(options.visible!=null){payload.visible=!!options.visible;}if(options.enabled!=null){payload.enabled=!!options.enabled;}if(options.transparent!=null){payload.transparent=!!options.transparent;}if(options.bridge!=null){payload.bridge=!!options.bridge;}return payload;}"
+        "function viewPatchPayload(options){options=options||{};validateViewSelector(options);var payload={label:options.label,windowId:options.windowId};var frame=optionalFramePayload(options);if(frame){payload.frame=frame;}if(options.layer!=null){payload.layer=ensureNumber(options.layer,'layer');}if(options.visible!=null){payload.visible=!!options.visible;}if(options.enabled!=null){payload.enabled=!!options.enabled;}if(options.role!=null){payload.role=ensureString(options.role,'role');}if(options.accessibilityLabel!=null){payload.accessibilityLabel=ensureString(options.accessibilityLabel,'accessibilityLabel');}if(options.text!=null){payload.text=ensureString(options.text,'text');}if(options.command!=null){payload.command=ensureString(options.command,'command');}if(options.url!=null){payload.url=ensureString(options.url,'url');}return payload;}"
         "function viewFramePayload(options){options=options||{};validateViewSelector(options);var frame=options.frame||options;return {label:options.label,windowId:options.windowId,frame:{x:frame.x==null?0:ensureNumber(frame.x,'frame.x'),y:frame.y==null?0:ensureNumber(frame.y,'frame.y'),width:ensureNumber(frame.width,'frame.width'),height:ensureNumber(frame.height,'frame.height')}};}"
         "function viewVisiblePayload(options){options=options||{};validateViewSelector(options);if(options.visible==null){throw new TypeError('visible is required');}return {label:options.label,windowId:options.windowId,visible:!!options.visible};}"
         "function viewHandle(info){return Object.freeze(Object.assign({},info,{update:function(patch){return views.update(Object.assign({},patch||{},{label:info.label,windowId:info.windowId}));},setFrame:function(frame){return views.setFrame({label:info.label,windowId:info.windowId,frame:frame});},setVisible:function(visible){return views.setVisible({label:info.label,windowId:info.windowId,visible:visible});},focus:function(){return views.focus({label:info.label,windowId:info.windowId});},close:function(){return views.close({label:info.label,windowId:info.windowId});}}));}"
@@ -1802,7 +1813,7 @@ int zero_native_gtk_close_window(zero_native_gtk_host_t *host, uint64_t window_i
     return 1;
 }
 
-int zero_native_gtk_create_view(zero_native_gtk_host_t *host, uint64_t window_id, const char *label, size_t label_len, int kind, const char *parent, size_t parent_len, double x, double y, double width, double height, int layer, int visible, int enabled, const char *role, size_t role_len, const char *text, size_t text_len, const char *command, size_t command_len) {
+int zero_native_gtk_create_view(zero_native_gtk_host_t *host, uint64_t window_id, const char *label, size_t label_len, int kind, const char *parent, size_t parent_len, double x, double y, double width, double height, int layer, int visible, int enabled, const char *role, size_t role_len, const char *accessibility_label, size_t accessibility_label_len, const char *text, size_t text_len, const char *command, size_t command_len) {
     zero_native_gtk_window_t *win = zero_native_find_window(host, window_id);
     if (!win || !win->stack_root || label_len == 0 || !zero_native_valid_native_view_frame(x, y, width, height)) return 0;
     if (!zero_native_is_supported_native_view_kind(kind)) return 0;
@@ -1811,12 +1822,14 @@ int zero_native_gtk_create_view(zero_native_gtk_host_t *host, uint64_t window_id
     char *label_copy = zero_native_strndup(label, label_len);
     char *parent_copy = parent_len > 0 ? zero_native_strndup(parent, parent_len) : NULL;
     char *role_copy = role_len > 0 ? zero_native_strndup(role, role_len) : NULL;
+    char *accessibility_label_copy = accessibility_label_len > 0 ? zero_native_strndup(accessibility_label, accessibility_label_len) : NULL;
     char *text_copy = text_len > 0 ? zero_native_strndup(text, text_len) : NULL;
     char *command_copy = command_len > 0 ? zero_native_strndup(command, command_len) : NULL;
-    if (!label_copy || (parent_len > 0 && !parent_copy) || (role_len > 0 && !role_copy) || (text_len > 0 && !text_copy) || (command_len > 0 && !command_copy)) {
+    if (!label_copy || (parent_len > 0 && !parent_copy) || (role_len > 0 && !role_copy) || (accessibility_label_len > 0 && !accessibility_label_copy) || (text_len > 0 && !text_copy) || (command_len > 0 && !command_copy)) {
         free(label_copy);
         free(parent_copy);
         free(role_copy);
+        free(accessibility_label_copy);
         free(text_copy);
         free(command_copy);
         return 0;
@@ -1825,6 +1838,7 @@ int zero_native_gtk_create_view(zero_native_gtk_host_t *host, uint64_t window_id
         free(label_copy);
         free(parent_copy);
         free(role_copy);
+        free(accessibility_label_copy);
         free(text_copy);
         free(command_copy);
         return 0;
@@ -1837,6 +1851,7 @@ int zero_native_gtk_create_view(zero_native_gtk_host_t *host, uint64_t window_id
             free(label_copy);
             free(parent_copy);
             free(role_copy);
+            free(accessibility_label_copy);
             free(text_copy);
             free(command_copy);
             return 0;
@@ -1850,6 +1865,7 @@ int zero_native_gtk_create_view(zero_native_gtk_host_t *host, uint64_t window_id
         free(label_copy);
         free(parent_copy);
         free(role_copy);
+        free(accessibility_label_copy);
         free(text_copy);
         free(command_copy);
         return 0;
@@ -1868,6 +1884,7 @@ int zero_native_gtk_create_view(zero_native_gtk_host_t *host, uint64_t window_id
         free(label_copy);
         free(parent_copy);
         free(role_copy);
+        free(accessibility_label_copy);
         free(text_copy);
         free(command_copy);
         return 0;
@@ -1878,6 +1895,7 @@ int zero_native_gtk_create_view(zero_native_gtk_host_t *host, uint64_t window_id
     view->label = label_copy;
     view->parent = parent_copy;
     view->role = role_copy;
+    view->accessibility_label = accessibility_label_copy;
     view->text = text_copy;
     view->command = command_copy;
     view->widget = widget;
@@ -1905,7 +1923,7 @@ int zero_native_gtk_create_view(zero_native_gtk_host_t *host, uint64_t window_id
     return 1;
 }
 
-int zero_native_gtk_update_view(zero_native_gtk_host_t *host, uint64_t window_id, const char *label, size_t label_len, int has_frame, double x, double y, double width, double height, int has_layer, int layer, int has_visible, int visible, int has_enabled, int enabled, int has_role, const char *role, size_t role_len, int has_text, const char *text, size_t text_len, int has_command, const char *command, size_t command_len) {
+int zero_native_gtk_update_view(zero_native_gtk_host_t *host, uint64_t window_id, const char *label, size_t label_len, int has_frame, double x, double y, double width, double height, int has_layer, int layer, int has_visible, int visible, int has_enabled, int enabled, int has_role, const char *role, size_t role_len, int has_accessibility_label, const char *accessibility_label, size_t accessibility_label_len, int has_text, const char *text, size_t text_len, int has_command, const char *command, size_t command_len) {
     zero_native_gtk_window_t *win = zero_native_find_window(host, window_id);
     char *label_copy = label_len > 0 ? zero_native_strndup(label, label_len) : NULL;
     zero_native_gtk_native_view_t *view = zero_native_find_native_view(win, label_copy);
@@ -1924,6 +1942,7 @@ int zero_native_gtk_update_view(zero_native_gtk_host_t *host, uint64_t window_id
     if (has_visible) view->visible = visible != 0;
     if (has_enabled) view->enabled = enabled != 0;
     if (has_role) zero_native_replace_string(&view->role, role, role_len);
+    if (has_accessibility_label) zero_native_replace_string(&view->accessibility_label, accessibility_label, accessibility_label_len);
     if (has_text) {
         zero_native_replace_string(&view->text, text, text_len);
         view->explicit_text = text_len > 0;
@@ -1935,18 +1954,18 @@ int zero_native_gtk_update_view(zero_native_gtk_host_t *host, uint64_t window_id
 
     int update_text = has_text || (has_role && !view->explicit_text);
     const char *display_text = has_text ? (view->text ? view->text : "") : zero_native_native_display_text(view);
-    if (has_visible || has_enabled || update_text) zero_native_apply_native_view_state(view, update_text, display_text);
+    if (has_visible || has_enabled || has_accessibility_label || update_text) zero_native_apply_native_view_state(view, update_text, display_text);
     if (update_text && view->kind == ZERO_NATIVE_GTK_VIEW_SEGMENTED_CONTROL) zero_native_configure_native_view_action(view);
     if (has_layer) zero_native_reorder_overlays(win);
     return 1;
 }
 
 int zero_native_gtk_set_view_frame(zero_native_gtk_host_t *host, uint64_t window_id, const char *label, size_t label_len, double x, double y, double width, double height) {
-    return zero_native_gtk_update_view(host, window_id, label, label_len, 1, x, y, width, height, 0, 0, 0, 1, 0, 1, 0, "", 0, 0, "", 0, 0, "", 0);
+    return zero_native_gtk_update_view(host, window_id, label, label_len, 1, x, y, width, height, 0, 0, 0, 1, 0, 1, 0, "", 0, 0, "", 0, 0, "", 0, 0, "", 0);
 }
 
 int zero_native_gtk_set_view_visible(zero_native_gtk_host_t *host, uint64_t window_id, const char *label, size_t label_len, int visible) {
-    return zero_native_gtk_update_view(host, window_id, label, label_len, 0, 0, 0, 0, 0, 0, 0, 1, visible, 0, 1, 0, "", 0, 0, "", 0, 0, "", 0);
+    return zero_native_gtk_update_view(host, window_id, label, label_len, 0, 0, 0, 0, 0, 0, 0, 1, visible, 0, 1, 0, "", 0, 0, "", 0, 0, "", 0, 0, "", 0);
 }
 
 int zero_native_gtk_focus_view(zero_native_gtk_host_t *host, uint64_t window_id, const char *label, size_t label_len) {

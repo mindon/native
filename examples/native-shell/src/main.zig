@@ -139,9 +139,9 @@ const builtin_policies = [_]zero_native.BridgeCommandPolicy{
 };
 const shell_views = [_]zero_native.ShellView{
     .{ .label = "toolbar", .kind = .toolbar, .edge = .top, .height = toolbar_height, .layer = 20, .role = "Toolbar" },
-    .{ .label = "refresh-button", .kind = .button, .parent = "toolbar", .x = 12, .y = 10, .width = 88, .height = 30, .layer = 21, .text = "Refresh", .command = "app.refresh" },
+    .{ .label = "refresh-button", .kind = .button, .parent = "toolbar", .x = 12, .y = 10, .width = 88, .height = 30, .layer = 21, .accessibility_label = "Refresh workspace", .text = "Refresh", .command = "app.refresh" },
     .{ .label = "palette-button", .kind = .button, .parent = "toolbar", .x = 108, .y = 10, .width = 132, .height = 30, .layer = 21, .text = "Command" },
-    .{ .label = "refresh-icon", .kind = .icon_button, .parent = "toolbar", .x = 248, .y = 10, .width = 30, .height = 30, .layer = 21, .text = "R", .command = "app.refresh" },
+    .{ .label = "refresh-icon", .kind = .icon_button, .parent = "toolbar", .x = 248, .y = 10, .width = 30, .height = 30, .layer = 21, .accessibility_label = "Refresh workspace", .text = "R", .command = "app.refresh" },
     .{ .label = "sync-indicator", .kind = .progress_indicator, .parent = "toolbar", .x = 288, .y = 13, .width = 24, .height = 24, .layer = 21, .role = "Syncing" },
     .{ .label = "view-mode", .kind = .segmented_control, .parent = "toolbar", .x = 324, .y = 10, .width = 168, .height = 30, .layer = 21, .text = "List|Grid", .command = "app.view.mode" },
     .{ .label = "title-search", .kind = .titlebar_accessory, .x = 780, .y = 8, .width = 300, .height = 36, .layer = 21, .role = "Search" },

@@ -32,9 +32,9 @@
                 .restore_policy = "center_on_primary",
                 .views = .{
                     .{ .label = "toolbar", .kind = "toolbar", .edge = "top", .height = 52, .role = "Toolbar" },
-                    .{ .label = "refresh-button", .kind = "button", .parent = "toolbar", .text = "Refresh", .command = "app.refresh" },
+                    .{ .label = "refresh-button", .kind = "button", .parent = "toolbar", .accessibility_label = "Refresh workspace", .text = "Refresh", .command = "app.refresh" },
                     .{ .label = "palette-button", .kind = "button", .parent = "toolbar", .text = "Command" },
-                    .{ .label = "refresh-icon", .kind = "icon_button", .parent = "toolbar", .x = 248, .y = 10, .width = 30, .height = 30, .text = "R", .command = "app.refresh" },
+                    .{ .label = "refresh-icon", .kind = "icon_button", .parent = "toolbar", .x = 248, .y = 10, .width = 30, .height = 30, .accessibility_label = "Refresh workspace", .text = "R", .command = "app.refresh" },
                     .{ .label = "view-mode", .kind = "segmented_control", .parent = "toolbar", .x = 324, .y = 10, .width = 168, .height = 30, .text = "List|Grid", .command = "app.view.mode" },
                     .{ .label = "title-search", .kind = "titlebar_accessory", .edge = "top", .height = 36, .role = "Search" },
                     .{ .label = "surface-search", .kind = "search_field", .parent = "title-search", .x = 0, .y = 3, .width = 280, .height = 28, .text = "Search native surfaces" },

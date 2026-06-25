@@ -91,6 +91,7 @@ pub const Metadata = struct {
                 if (view.edge) |edge| allocator.free(edge);
                 if (view.axis) |axis| allocator.free(axis);
                 if (view.role) |role| allocator.free(role);
+                if (view.accessibility_label) |accessibility_label| allocator.free(accessibility_label);
                 if (view.url) |url| allocator.free(url);
                 if (view.text) |text| allocator.free(text);
                 if (view.command) |command| allocator.free(command);
@@ -192,6 +193,7 @@ pub const ShellViewMetadata = struct {
     visible: bool = true,
     enabled: bool = true,
     role: ?[]const u8 = null,
+    accessibility_label: ?[]const u8 = null,
     url: ?[]const u8 = null,
     text: ?[]const u8 = null,
     command: ?[]const u8 = null,
@@ -505,6 +507,7 @@ fn convertRawShellViews(allocator: std.mem.Allocator, views: []const RawShellVie
             .visible = view.visible,
             .enabled = view.enabled,
             .role = try duplicateOptionalString(allocator, view.role),
+            .accessibility_label = try duplicateOptionalString(allocator, view.accessibility_label),
             .url = try duplicateOptionalString(allocator, view.url),
             .text = try duplicateOptionalString(allocator, view.text),
             .command = try duplicateOptionalString(allocator, view.command),
@@ -721,6 +724,7 @@ fn parseShellViews(allocator: std.mem.Allocator, values: []const ShellViewMetada
             .visible = view.visible,
             .enabled = view.enabled,
             .role = view.role,
+            .accessibility_label = view.accessibility_label,
             .url = view.url,
             .text = view.text,
             .command = view.command,
@@ -1208,7 +1212,7 @@ test "manifest metadata parser reads shell windows and views" {
         \\          .{ .label = "status", .kind = "statusbar", .edge = "bottom", .height = 24, .text = "Ready" },
         \\          .{ .label = "toolbar-stack", .kind = "stack", .parent = "toolbar", .axis = "column" },
         \\          .{ .label = "refresh-icon", .kind = "icon_button", .parent = "toolbar", .text = "R", .command = "app.refresh.icon" },
-        \\          .{ .label = "save", .kind = "button", .parent = "toolbar", .text = "Save", .command = "app.save" },
+        \\          .{ .label = "save", .kind = "button", .parent = "toolbar", .accessibility_label = "Save document", .text = "Save", .command = "app.save" },
         \\          .{ .label = "mode", .kind = "segmented_control", .parent = "toolbar", .text = "List|Grid", .command = "app.view.mode" },
         \\          .{ .label = "syncing", .kind = "progress_indicator", .parent = "toolbar", .role = "Syncing" },
         \\        },
@@ -1232,6 +1236,7 @@ test "manifest metadata parser reads shell windows and views" {
     try std.testing.expectEqualStrings("column", metadata.shell.windows[0].views[3].axis.?);
     try std.testing.expectEqualStrings("icon_button", metadata.shell.windows[0].views[4].kind);
     try std.testing.expectEqualStrings("app.save", metadata.shell.windows[0].views[5].command.?);
+    try std.testing.expectEqualStrings("Save document", metadata.shell.windows[0].views[5].accessibility_label.?);
     try std.testing.expectEqualStrings("segmented_control", metadata.shell.windows[0].views[6].kind);
     try std.testing.expectEqualStrings("progress_indicator", metadata.shell.windows[0].views[7].kind);
 
@@ -1245,6 +1250,7 @@ test "manifest metadata parser reads shell windows and views" {
     try std.testing.expectEqual(app_manifest.ViewKind.stack, shell.windows[0].views[3].kind);
     try std.testing.expectEqual(app_manifest.ShellAxis.column, shell.windows[0].views[3].axis.?);
     try std.testing.expectEqual(app_manifest.ViewKind.icon_button, shell.windows[0].views[4].kind);
+    try std.testing.expectEqualStrings("Save document", shell.windows[0].views[5].accessibility_label.?);
     try std.testing.expectEqual(app_manifest.ViewKind.segmented_control, shell.windows[0].views[6].kind);
     try std.testing.expectEqual(app_manifest.ViewKind.progress_indicator, shell.windows[0].views[7].kind);
     try std.testing.expectEqual(app_manifest.ShellEdge.top, shell.windows[0].views[0].edge.?);

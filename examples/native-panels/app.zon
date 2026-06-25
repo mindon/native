@@ -26,7 +26,7 @@
                     .{ .label = "view-mode", .kind = "segmented_control", .parent = "filters", .width = 172, .height = 30, .text = "All|Open|Done" },
                     .{ .label = "live-filter", .kind = "checkbox", .parent = "filters", .width = 160, .height = 24, .text = "Live filters" },
                     .{ .label = "preview-toggle", .kind = "toggle", .parent = "filters", .width = 140, .height = 28, .text = "Preview" },
-                    .{ .label = "apply-filter", .kind = "button", .parent = "filters", .width = 92, .height = 30, .text = "Apply", .command = "panel.apply" },
+                    .{ .label = "apply-filter", .kind = "button", .parent = "filters", .width = 92, .height = 30, .accessibility_label = "Apply filters", .text = "Apply", .command = "panel.apply" },
                     .{ .label = "main", .kind = "webview", .parent = "body", .url = "zero://inline", .fill = true },
                     .{ .label = "statusbar", .kind = "statusbar", .edge = "bottom", .height = 34, .role = "Status" },
                     .{ .label = "status-label", .kind = "label", .parent = "statusbar", .x = 14, .y = 8, .width = 560, .height = 18, .text = "Ready." },

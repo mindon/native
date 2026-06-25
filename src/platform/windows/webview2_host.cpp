@@ -187,6 +187,7 @@ struct NativeView {
     std::string label;
     std::string parent;
     std::string role;
+    std::string accessibility_label;
     std::string text;
     std::string command;
     double x = 0;
@@ -1192,8 +1193,8 @@ static const wchar_t *zeroNativeBridgeScript() {
 	function webviewHandle(info){return Object.freeze(Object.assign({},info,{setFrame:function(frame){return webviews.setFrame({label:info.label,windowId:info.windowId,frame:frame});},navigate:function(url){return webviews.navigate({label:info.label,windowId:info.windowId,url:url});},setZoom:function(zoom){return webviews.setZoom({label:info.label,windowId:info.windowId,zoom:zoom});},setLayer:function(layer){return webviews.setLayer({label:info.label,windowId:info.windowId,layer:layer});},close:function(){return webviews.close({label:info.label,windowId:info.windowId});}}));}
 	function validateViewSelector(options){options=options||{};ensureString(options.label,'label');if(options.windowId!=null&&(typeof options.windowId!=='number'||!isFinite(options.windowId)||options.windowId<0||Math.floor(options.windowId)!==options.windowId)){throw new TypeError('windowId must be a non-negative integer');}}
 	function optionalFramePayload(options){var frame=options.frame||((options.x!=null||options.y!=null||options.width!=null||options.height!=null)?options:null);if(!frame){return null;}return {x:frame.x==null?0:ensureNumber(frame.x,'frame.x'),y:frame.y==null?0:ensureNumber(frame.y,'frame.y'),width:ensureNumber(frame.width,'frame.width'),height:ensureNumber(frame.height,'frame.height')};}
-	function viewCreatePayload(options){options=options||{};validateViewSelector(options);ensureString(options.kind,'kind');var payload={label:options.label,kind:options.kind,windowId:options.windowId};var frame=optionalFramePayload(options);if(frame){payload.frame=frame;}if(options.parent!=null){payload.parent=ensureString(options.parent,'parent');}if(options.role!=null){payload.role=ensureString(options.role,'role');}if(options.text!=null){payload.text=ensureString(options.text,'text');}if(options.command!=null){payload.command=ensureString(options.command,'command');}if(options.url!=null){payload.url=ensureString(options.url,'url');}if(options.layer!=null){payload.layer=ensureNumber(options.layer,'layer');}if(options.visible!=null){payload.visible=!!options.visible;}if(options.enabled!=null){payload.enabled=!!options.enabled;}if(options.transparent!=null){payload.transparent=!!options.transparent;}if(options.bridge!=null){payload.bridge=!!options.bridge;}return payload;}
-	function viewPatchPayload(options){options=options||{};validateViewSelector(options);var payload={label:options.label,windowId:options.windowId};var frame=optionalFramePayload(options);if(frame){payload.frame=frame;}if(options.layer!=null){payload.layer=ensureNumber(options.layer,'layer');}if(options.visible!=null){payload.visible=!!options.visible;}if(options.enabled!=null){payload.enabled=!!options.enabled;}if(options.role!=null){payload.role=ensureString(options.role,'role');}if(options.text!=null){payload.text=ensureString(options.text,'text');}if(options.command!=null){payload.command=ensureString(options.command,'command');}if(options.url!=null){payload.url=ensureString(options.url,'url');}return payload;}
+	function viewCreatePayload(options){options=options||{};validateViewSelector(options);ensureString(options.kind,'kind');var payload={label:options.label,kind:options.kind,windowId:options.windowId};var frame=optionalFramePayload(options);if(frame){payload.frame=frame;}if(options.parent!=null){payload.parent=ensureString(options.parent,'parent');}if(options.role!=null){payload.role=ensureString(options.role,'role');}if(options.accessibilityLabel!=null){payload.accessibilityLabel=ensureString(options.accessibilityLabel,'accessibilityLabel');}if(options.text!=null){payload.text=ensureString(options.text,'text');}if(options.command!=null){payload.command=ensureString(options.command,'command');}if(options.url!=null){payload.url=ensureString(options.url,'url');}if(options.layer!=null){payload.layer=ensureNumber(options.layer,'layer');}if(options.visible!=null){payload.visible=!!options.visible;}if(options.enabled!=null){payload.enabled=!!options.enabled;}if(options.transparent!=null){payload.transparent=!!options.transparent;}if(options.bridge!=null){payload.bridge=!!options.bridge;}return payload;}
+	function viewPatchPayload(options){options=options||{};validateViewSelector(options);var payload={label:options.label,windowId:options.windowId};var frame=optionalFramePayload(options);if(frame){payload.frame=frame;}if(options.layer!=null){payload.layer=ensureNumber(options.layer,'layer');}if(options.visible!=null){payload.visible=!!options.visible;}if(options.enabled!=null){payload.enabled=!!options.enabled;}if(options.role!=null){payload.role=ensureString(options.role,'role');}if(options.accessibilityLabel!=null){payload.accessibilityLabel=ensureString(options.accessibilityLabel,'accessibilityLabel');}if(options.text!=null){payload.text=ensureString(options.text,'text');}if(options.command!=null){payload.command=ensureString(options.command,'command');}if(options.url!=null){payload.url=ensureString(options.url,'url');}return payload;}
 	function viewFramePayload(options){options=options||{};validateViewSelector(options);var frame=options.frame||options;return {label:options.label,windowId:options.windowId,frame:{x:frame.x==null?0:ensureNumber(frame.x,'frame.x'),y:frame.y==null?0:ensureNumber(frame.y,'frame.y'),width:ensureNumber(frame.width,'frame.width'),height:ensureNumber(frame.height,'frame.height')}};}
 	function viewVisiblePayload(options){options=options||{};validateViewSelector(options);if(options.visible==null){throw new TypeError('visible is required');}return {label:options.label,windowId:options.windowId,visible:!!options.visible};}
 	function viewHandle(info){return Object.freeze(Object.assign({},info,{update:function(patch){return views.update(Object.assign({},patch||{},{label:info.label,windowId:info.windowId}));},setFrame:function(frame){return views.setFrame({label:info.label,windowId:info.windowId,frame:frame});},setVisible:function(visible){return views.setVisible({label:info.label,windowId:info.windowId,visible:visible});},focus:function(){return views.focus({label:info.label,windowId:info.windowId});},close:function(){return views.close({label:info.label,windowId:info.windowId});}}));}
@@ -1831,7 +1832,7 @@ int zero_native_windows_close_window(Host *host, uint64_t window_id) {
     return 1;
 }
 
-int zero_native_windows_create_view(Host *host, uint64_t window_id, const char *label, size_t label_len, int kind, const char *parent, size_t parent_len, double x, double y, double width, double height, int layer, int visible, int enabled, const char *role, size_t role_len, const char *text, size_t text_len, const char *command, size_t command_len) {
+int zero_native_windows_create_view(Host *host, uint64_t window_id, const char *label, size_t label_len, int kind, const char *parent, size_t parent_len, double x, double y, double width, double height, int layer, int visible, int enabled, const char *role, size_t role_len, const char *accessibility_label, size_t accessibility_label_len, const char *text, size_t text_len, const char *command, size_t command_len) {
     if (!host || label_len == 0 || !isSupportedNativeViewKind(kind) || !validNativeViewFrame(x, y, width, height)) return 0;
     auto window = host->windows.find(window_id);
     if (window == host->windows.end() || !window->second.hwnd) return 0;
@@ -1851,6 +1852,7 @@ int zero_native_windows_create_view(Host *host, uint64_t window_id, const char *
     view.label = label_string;
     view.parent = parent_string;
     view.role = slice(role, role_len);
+    view.accessibility_label = slice(accessibility_label, accessibility_label_len);
     view.text = slice(text, text_len);
     view.command = slice(command, command_len);
     view.x = x;
@@ -1949,7 +1951,7 @@ int zero_native_windows_create_view(Host *host, uint64_t window_id, const char *
     return 1;
 }
 
-int zero_native_windows_update_view(Host *host, uint64_t window_id, const char *label, size_t label_len, int has_frame, double x, double y, double width, double height, int has_layer, int layer, int has_visible, int visible, int has_enabled, int enabled, int has_role, const char *role, size_t role_len, int has_text, const char *text, size_t text_len, int has_command, const char *command, size_t command_len) {
+int zero_native_windows_update_view(Host *host, uint64_t window_id, const char *label, size_t label_len, int has_frame, double x, double y, double width, double height, int has_layer, int layer, int has_visible, int visible, int has_enabled, int enabled, int has_role, const char *role, size_t role_len, int has_accessibility_label, const char *accessibility_label, size_t accessibility_label_len, int has_text, const char *text, size_t text_len, int has_command, const char *command, size_t command_len) {
     if (!host || label_len == 0) return 0;
     std::string label_string = slice(label, label_len);
     auto found = host->native_views.find(nativeViewKey(window_id, label_string));
@@ -1969,6 +1971,7 @@ int zero_native_windows_update_view(Host *host, uint64_t window_id, const char *
     if (has_visible) view.visible = visible != 0;
     if (has_enabled) view.enabled = enabled != 0;
     if (has_role) view.role = slice(role, role_len);
+    if (has_accessibility_label) view.accessibility_label = slice(accessibility_label, accessibility_label_len);
     if (has_text) {
         view.text = slice(text, text_len);
         view.explicit_text = text_len > 0;
@@ -1983,11 +1986,11 @@ int zero_native_windows_update_view(Host *host, uint64_t window_id, const char *
 }
 
 int zero_native_windows_set_view_frame(Host *host, uint64_t window_id, const char *label, size_t label_len, double x, double y, double width, double height) {
-    return zero_native_windows_update_view(host, window_id, label, label_len, 1, x, y, width, height, 0, 0, 0, 1, 0, 1, 0, "", 0, 0, "", 0, 0, "", 0);
+    return zero_native_windows_update_view(host, window_id, label, label_len, 1, x, y, width, height, 0, 0, 0, 1, 0, 1, 0, "", 0, 0, "", 0, 0, "", 0, 0, "", 0);
 }
 
 int zero_native_windows_set_view_visible(Host *host, uint64_t window_id, const char *label, size_t label_len, int visible) {
-    return zero_native_windows_update_view(host, window_id, label, label_len, 0, 0, 0, 0, 0, 0, 0, 1, visible, 0, 1, 0, "", 0, 0, "", 0, 0, "", 0);
+    return zero_native_windows_update_view(host, window_id, label, label_len, 0, 0, 0, 0, 0, 0, 0, 1, visible, 0, 1, 0, "", 0, 0, "", 0, 0, "", 0, 0, "", 0);
 }
 
 int zero_native_windows_focus_view(Host *host, uint64_t window_id, const char *label, size_t label_len) {

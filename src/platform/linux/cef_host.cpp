@@ -282,7 +282,7 @@ int zero_native_gtk_close_window(Host *host, uint64_t window_id) {
     return 1;
 }
 
-int zero_native_gtk_create_view(Host *host, uint64_t window_id, const char *label, size_t label_len, int kind, const char *parent, size_t parent_len, double x, double y, double width, double height, int layer, int visible, int enabled, const char *role, size_t role_len, const char *text, size_t text_len, const char *command, size_t command_len) {
+int zero_native_gtk_create_view(Host *host, uint64_t window_id, const char *label, size_t label_len, int kind, const char *parent, size_t parent_len, double x, double y, double width, double height, int layer, int visible, int enabled, const char *role, size_t role_len, const char *accessibility_label, size_t accessibility_label_len, const char *text, size_t text_len, const char *command, size_t command_len) {
     (void)host;
     (void)window_id;
     (void)label;
@@ -299,6 +299,8 @@ int zero_native_gtk_create_view(Host *host, uint64_t window_id, const char *labe
     (void)enabled;
     (void)role;
     (void)role_len;
+    (void)accessibility_label;
+    (void)accessibility_label_len;
     (void)text;
     (void)text_len;
     (void)command;
@@ -306,7 +308,7 @@ int zero_native_gtk_create_view(Host *host, uint64_t window_id, const char *labe
     return 0;
 }
 
-int zero_native_gtk_update_view(Host *host, uint64_t window_id, const char *label, size_t label_len, int has_frame, double x, double y, double width, double height, int has_layer, int layer, int has_visible, int visible, int has_enabled, int enabled, int has_role, const char *role, size_t role_len, int has_text, const char *text, size_t text_len, int has_command, const char *command, size_t command_len) {
+int zero_native_gtk_update_view(Host *host, uint64_t window_id, const char *label, size_t label_len, int has_frame, double x, double y, double width, double height, int has_layer, int layer, int has_visible, int visible, int has_enabled, int enabled, int has_role, const char *role, size_t role_len, int has_accessibility_label, const char *accessibility_label, size_t accessibility_label_len, int has_text, const char *text, size_t text_len, int has_command, const char *command, size_t command_len) {
     (void)host;
     (void)window_id;
     (void)label;
@@ -325,6 +327,9 @@ int zero_native_gtk_update_view(Host *host, uint64_t window_id, const char *labe
     (void)has_role;
     (void)role;
     (void)role_len;
+    (void)has_accessibility_label;
+    (void)accessibility_label;
+    (void)accessibility_label_len;
     (void)has_text;
     (void)text;
     (void)text_len;

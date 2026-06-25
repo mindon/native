@@ -129,12 +129,12 @@ static NSMutableDictionary *ZeroNativeCredentialQuery(NSString *service, NSStrin
 - (NSRect)viewFrameForContainer:(NSView *)container x:(double)x y:(double)y width:(double)width height:(double)height;
 - (NSView *)nativeParentViewForWindow:(uint64_t)windowId parent:(NSString *)parent;
 - (NSView *)makeNativeViewWithKind:(NSInteger)kind label:(NSString *)label role:(NSString *)role text:(NSString *)text;
-- (void)applyNativeViewState:(NSView *)view enabled:(BOOL)enabled role:(NSString *)role text:(NSString *)text;
+- (void)applyNativeViewState:(NSView *)view enabled:(BOOL)enabled role:(NSString *)role accessibilityLabel:(NSString *)accessibilityLabel text:(NSString *)text;
 - (void)applySegmentedControl:(NSSegmentedControl *)control text:(NSString *)text;
 - (void)configureNativeView:(NSView *)view command:(NSString *)command key:(NSString *)key;
 - (void)emitNativeCommandForSender:(id)sender;
-- (BOOL)createNativeViewInWindow:(uint64_t)windowId label:(NSString *)label kind:(NSInteger)kind parent:(NSString *)parent x:(double)x y:(double)y width:(double)width height:(double)height layer:(NSInteger)layer visible:(BOOL)visible enabled:(BOOL)enabled role:(NSString *)role text:(NSString *)text command:(NSString *)command;
-- (BOOL)updateNativeViewInWindow:(uint64_t)windowId label:(NSString *)label hasFrame:(BOOL)hasFrame x:(double)x y:(double)y width:(double)width height:(double)height hasLayer:(BOOL)hasLayer layer:(NSInteger)layer hasVisible:(BOOL)hasVisible visible:(BOOL)visible hasEnabled:(BOOL)hasEnabled enabled:(BOOL)enabled hasRole:(BOOL)hasRole role:(NSString *)role hasText:(BOOL)hasText text:(NSString *)text hasCommand:(BOOL)hasCommand command:(NSString *)command;
+- (BOOL)createNativeViewInWindow:(uint64_t)windowId label:(NSString *)label kind:(NSInteger)kind parent:(NSString *)parent x:(double)x y:(double)y width:(double)width height:(double)height layer:(NSInteger)layer visible:(BOOL)visible enabled:(BOOL)enabled role:(NSString *)role accessibilityLabel:(NSString *)accessibilityLabel text:(NSString *)text command:(NSString *)command;
+- (BOOL)updateNativeViewInWindow:(uint64_t)windowId label:(NSString *)label hasFrame:(BOOL)hasFrame x:(double)x y:(double)y width:(double)width height:(double)height hasLayer:(BOOL)hasLayer layer:(NSInteger)layer hasVisible:(BOOL)hasVisible visible:(BOOL)visible hasEnabled:(BOOL)hasEnabled enabled:(BOOL)enabled hasRole:(BOOL)hasRole role:(NSString *)role hasAccessibilityLabel:(BOOL)hasAccessibilityLabel accessibilityLabel:(NSString *)accessibilityLabel hasText:(BOOL)hasText text:(NSString *)text hasCommand:(BOOL)hasCommand command:(NSString *)command;
 - (BOOL)setNativeViewFrameInWindow:(uint64_t)windowId label:(NSString *)label x:(double)x y:(double)y width:(double)width height:(double)height;
 - (BOOL)setNativeViewVisibleInWindow:(uint64_t)windowId label:(NSString *)label visible:(BOOL)visible;
 - (BOOL)focusNativeViewInWindow:(uint64_t)windowId label:(NSString *)label;
@@ -648,7 +648,7 @@ static NSMutableDictionary *ZeroNativeCredentialQuery(NSString *service, NSStrin
     if (control.selectedSegment < 0 && labels.count > 0) control.selectedSegment = 0;
 }
 
-- (void)applyNativeViewState:(NSView *)view enabled:(BOOL)enabled role:(NSString *)role text:(NSString *)text {
+- (void)applyNativeViewState:(NSView *)view enabled:(BOOL)enabled role:(NSString *)role accessibilityLabel:(NSString *)accessibilityLabel text:(NSString *)text {
     if ([view respondsToSelector:@selector(setEnabled:)]) {
         ((void (*)(id, SEL, BOOL))[view methodForSelector:@selector(setEnabled:)])(view, @selector(setEnabled:), enabled);
     }
@@ -668,7 +668,9 @@ static NSMutableDictionary *ZeroNativeCredentialQuery(NSString *service, NSStrin
             ((NSButton *)view).title = text;
         }
     }
-    if (role) {
+    if (accessibilityLabel) {
+        [view setAccessibilityLabel:accessibilityLabel];
+    } else if (role) {
         [view setAccessibilityLabel:(role.length > 0 ? role : (text.length > 0 ? text : @""))];
     } else if (text) {
         [view setAccessibilityLabel:text];
@@ -715,7 +717,7 @@ static NSMutableDictionary *ZeroNativeCredentialQuery(NSString *service, NSStrin
     }];
 }
 
-- (BOOL)createNativeViewInWindow:(uint64_t)windowId label:(NSString *)label kind:(NSInteger)kind parent:(NSString *)parent x:(double)x y:(double)y width:(double)width height:(double)height layer:(NSInteger)layer visible:(BOOL)visible enabled:(BOOL)enabled role:(NSString *)role text:(NSString *)text command:(NSString *)command {
+- (BOOL)createNativeViewInWindow:(uint64_t)windowId label:(NSString *)label kind:(NSInteger)kind parent:(NSString *)parent x:(double)x y:(double)y width:(double)width height:(double)height layer:(NSInteger)layer visible:(BOOL)visible enabled:(BOOL)enabled role:(NSString *)role accessibilityLabel:(NSString *)accessibilityLabel text:(NSString *)text command:(NSString *)command {
     if (label.length == 0 || x < 0 || y < 0 || width < 0 || height < 0) return NO;
     if (self.nativeViews.count >= ZeroNativeMaxNativeViews) return NO;
     NSWindow *window = self.windows[@(windowId)] ?: (windowId == 1 ? self.window : nil);
@@ -733,7 +735,8 @@ static NSMutableDictionary *ZeroNativeCredentialQuery(NSString *service, NSStrin
     view.hidden = !visible;
     view.layer.zPosition = layer;
     NSString *initialText = text.length > 0 ? text : (role.length > 0 ? role : nil);
-    [self applyNativeViewState:view enabled:enabled role:role text:initialText];
+    NSString *initialAccessibilityLabel = accessibilityLabel.length > 0 ? accessibilityLabel : nil;
+    [self applyNativeViewState:view enabled:enabled role:role accessibilityLabel:initialAccessibilityLabel text:initialText];
     [self configureNativeView:view command:command key:key];
 
     [parentView addSubview:view positioned:NSWindowAbove relativeTo:nil];
@@ -748,7 +751,7 @@ static NSMutableDictionary *ZeroNativeCredentialQuery(NSString *service, NSStrin
     return YES;
 }
 
-- (BOOL)updateNativeViewInWindow:(uint64_t)windowId label:(NSString *)label hasFrame:(BOOL)hasFrame x:(double)x y:(double)y width:(double)width height:(double)height hasLayer:(BOOL)hasLayer layer:(NSInteger)layer hasVisible:(BOOL)hasVisible visible:(BOOL)visible hasEnabled:(BOOL)hasEnabled enabled:(BOOL)enabled hasRole:(BOOL)hasRole role:(NSString *)role hasText:(BOOL)hasText text:(NSString *)text hasCommand:(BOOL)hasCommand command:(NSString *)command {
+- (BOOL)updateNativeViewInWindow:(uint64_t)windowId label:(NSString *)label hasFrame:(BOOL)hasFrame x:(double)x y:(double)y width:(double)width height:(double)height hasLayer:(BOOL)hasLayer layer:(NSInteger)layer hasVisible:(BOOL)hasVisible visible:(BOOL)visible hasEnabled:(BOOL)hasEnabled enabled:(BOOL)enabled hasRole:(BOOL)hasRole role:(NSString *)role hasAccessibilityLabel:(BOOL)hasAccessibilityLabel accessibilityLabel:(NSString *)accessibilityLabel hasText:(BOOL)hasText text:(NSString *)text hasCommand:(BOOL)hasCommand command:(NSString *)command {
     NSString *key = [self nativeViewKeyForWindow:windowId label:label];
     NSView *view = self.nativeViews[key];
     if (!view) return NO;
@@ -763,7 +766,7 @@ static NSMutableDictionary *ZeroNativeCredentialQuery(NSString *service, NSStrin
         view.layer.zPosition = layer;
     }
     if (hasVisible) view.hidden = !visible;
-    BOOL shouldApplyState = hasEnabled || hasRole || hasText;
+    BOOL shouldApplyState = hasEnabled || hasRole || hasAccessibilityLabel || hasText;
     if (hasText) {
         if (text.length > 0) {
             [self.nativeViewExplicitTextKeys addObject:key];
@@ -781,7 +784,7 @@ static NSMutableDictionary *ZeroNativeCredentialQuery(NSString *service, NSStrin
         }
         BOOL explicitText = [self.nativeViewExplicitTextKeys containsObject:key];
         NSString *displayText = hasText ? text : ((!explicitText && hasRole) ? role : nil);
-        [self applyNativeViewState:view enabled:currentEnabled role:(hasRole ? role : nil) text:displayText];
+        [self applyNativeViewState:view enabled:currentEnabled role:(hasRole ? role : nil) accessibilityLabel:(hasAccessibilityLabel ? accessibilityLabel : nil) text:displayText];
     }
     if (hasCommand) [self configureNativeView:view command:command key:key];
     [self reorderWebViewsInWindow:windowId];
@@ -790,11 +793,11 @@ static NSMutableDictionary *ZeroNativeCredentialQuery(NSString *service, NSStrin
 }
 
 - (BOOL)setNativeViewFrameInWindow:(uint64_t)windowId label:(NSString *)label x:(double)x y:(double)y width:(double)width height:(double)height {
-    return [self updateNativeViewInWindow:windowId label:label hasFrame:YES x:x y:y width:width height:height hasLayer:NO layer:0 hasVisible:NO visible:YES hasEnabled:NO enabled:YES hasRole:NO role:@"" hasText:NO text:@"" hasCommand:NO command:@""];
+    return [self updateNativeViewInWindow:windowId label:label hasFrame:YES x:x y:y width:width height:height hasLayer:NO layer:0 hasVisible:NO visible:YES hasEnabled:NO enabled:YES hasRole:NO role:@"" hasAccessibilityLabel:NO accessibilityLabel:@"" hasText:NO text:@"" hasCommand:NO command:@""];
 }
 
 - (BOOL)setNativeViewVisibleInWindow:(uint64_t)windowId label:(NSString *)label visible:(BOOL)visible {
-    return [self updateNativeViewInWindow:windowId label:label hasFrame:NO x:0 y:0 width:0 height:0 hasLayer:NO layer:0 hasVisible:YES visible:visible hasEnabled:NO enabled:YES hasRole:NO role:@"" hasText:NO text:@"" hasCommand:NO command:@""];
+    return [self updateNativeViewInWindow:windowId label:label hasFrame:NO x:0 y:0 width:0 height:0 hasLayer:NO layer:0 hasVisible:YES visible:visible hasEnabled:NO enabled:YES hasRole:NO role:@"" hasAccessibilityLabel:NO accessibilityLabel:@"" hasText:NO text:@"" hasCommand:NO command:@""];
 }
 
 - (BOOL)focusNativeViewInWindow:(uint64_t)windowId label:(NSString *)label {
@@ -1192,8 +1195,8 @@ static NSString *ZeroNativeAppKitBridgeScript(void) {
         "function webviewHandle(info){return Object.freeze(Object.assign({},info,{setFrame:function(frame){return webviews.setFrame({label:info.label,windowId:info.windowId,frame:frame});},navigate:function(url){return webviews.navigate({label:info.label,windowId:info.windowId,url:url});},setZoom:function(zoom){return webviews.setZoom({label:info.label,windowId:info.windowId,zoom:zoom});},setLayer:function(layer){return webviews.setLayer({label:info.label,windowId:info.windowId,layer:layer});},close:function(){return webviews.close({label:info.label,windowId:info.windowId});}}));}"
         "function validateViewSelector(options){options=options||{};ensureString(options.label,'label');if(options.windowId!=null&&(typeof options.windowId!=='number'||!isFinite(options.windowId)||options.windowId<0||Math.floor(options.windowId)!==options.windowId)){throw new TypeError('windowId must be a non-negative integer');}}"
         "function optionalFramePayload(options){var frame=options.frame||((options.x!=null||options.y!=null||options.width!=null||options.height!=null)?options:null);if(!frame){return null;}return {x:frame.x==null?0:ensureNumber(frame.x,'frame.x'),y:frame.y==null?0:ensureNumber(frame.y,'frame.y'),width:ensureNumber(frame.width,'frame.width'),height:ensureNumber(frame.height,'frame.height')};}"
-        "function viewCreatePayload(options){options=options||{};validateViewSelector(options);ensureString(options.kind,'kind');var payload={label:options.label,kind:options.kind,windowId:options.windowId};var frame=optionalFramePayload(options);if(frame){payload.frame=frame;}if(options.parent!=null){payload.parent=ensureString(options.parent,'parent');}if(options.role!=null){payload.role=ensureString(options.role,'role');}if(options.text!=null){payload.text=ensureString(options.text,'text');}if(options.command!=null){payload.command=ensureString(options.command,'command');}if(options.url!=null){payload.url=ensureString(options.url,'url');}if(options.layer!=null){payload.layer=ensureNumber(options.layer,'layer');}if(options.visible!=null){payload.visible=!!options.visible;}if(options.enabled!=null){payload.enabled=!!options.enabled;}if(options.transparent!=null){payload.transparent=!!options.transparent;}if(options.bridge!=null){payload.bridge=!!options.bridge;}return payload;}"
-        "function viewPatchPayload(options){options=options||{};validateViewSelector(options);var payload={label:options.label,windowId:options.windowId};var frame=optionalFramePayload(options);if(frame){payload.frame=frame;}if(options.layer!=null){payload.layer=ensureNumber(options.layer,'layer');}if(options.visible!=null){payload.visible=!!options.visible;}if(options.enabled!=null){payload.enabled=!!options.enabled;}if(options.role!=null){payload.role=ensureString(options.role,'role');}if(options.text!=null){payload.text=ensureString(options.text,'text');}if(options.command!=null){payload.command=ensureString(options.command,'command');}if(options.url!=null){payload.url=ensureString(options.url,'url');}return payload;}"
+        "function viewCreatePayload(options){options=options||{};validateViewSelector(options);ensureString(options.kind,'kind');var payload={label:options.label,kind:options.kind,windowId:options.windowId};var frame=optionalFramePayload(options);if(frame){payload.frame=frame;}if(options.parent!=null){payload.parent=ensureString(options.parent,'parent');}if(options.role!=null){payload.role=ensureString(options.role,'role');}if(options.accessibilityLabel!=null){payload.accessibilityLabel=ensureString(options.accessibilityLabel,'accessibilityLabel');}if(options.text!=null){payload.text=ensureString(options.text,'text');}if(options.command!=null){payload.command=ensureString(options.command,'command');}if(options.url!=null){payload.url=ensureString(options.url,'url');}if(options.layer!=null){payload.layer=ensureNumber(options.layer,'layer');}if(options.visible!=null){payload.visible=!!options.visible;}if(options.enabled!=null){payload.enabled=!!options.enabled;}if(options.transparent!=null){payload.transparent=!!options.transparent;}if(options.bridge!=null){payload.bridge=!!options.bridge;}return payload;}"
+        "function viewPatchPayload(options){options=options||{};validateViewSelector(options);var payload={label:options.label,windowId:options.windowId};var frame=optionalFramePayload(options);if(frame){payload.frame=frame;}if(options.layer!=null){payload.layer=ensureNumber(options.layer,'layer');}if(options.visible!=null){payload.visible=!!options.visible;}if(options.enabled!=null){payload.enabled=!!options.enabled;}if(options.role!=null){payload.role=ensureString(options.role,'role');}if(options.accessibilityLabel!=null){payload.accessibilityLabel=ensureString(options.accessibilityLabel,'accessibilityLabel');}if(options.text!=null){payload.text=ensureString(options.text,'text');}if(options.command!=null){payload.command=ensureString(options.command,'command');}if(options.url!=null){payload.url=ensureString(options.url,'url');}return payload;}"
         "function viewFramePayload(options){options=options||{};validateViewSelector(options);var frame=options.frame||options;return {label:options.label,windowId:options.windowId,frame:{x:frame.x==null?0:ensureNumber(frame.x,'frame.x'),y:frame.y==null?0:ensureNumber(frame.y,'frame.y'),width:ensureNumber(frame.width,'frame.width'),height:ensureNumber(frame.height,'frame.height')}};}"
         "function viewVisiblePayload(options){options=options||{};validateViewSelector(options);if(options.visible==null){throw new TypeError('visible is required');}return {label:options.label,windowId:options.windowId,visible:!!options.visible};}"
         "function viewHandle(info){return Object.freeze(Object.assign({},info,{update:function(patch){return views.update(Object.assign({},patch||{},{label:info.label,windowId:info.windowId}));},setFrame:function(frame){return views.setFrame({label:info.label,windowId:info.windowId,frame:frame});},setVisible:function(visible){return views.setVisible({label:info.label,windowId:info.windowId,visible:visible});},focus:function(){return views.focus({label:info.label,windowId:info.windowId});},close:function(){return views.close({label:info.label,windowId:info.windowId});}}));}"
@@ -2142,23 +2145,25 @@ int zero_native_appkit_close_window(zero_native_appkit_host_t *host, uint64_t wi
     return 1;
 }
 
-int zero_native_appkit_create_view(zero_native_appkit_host_t *host, uint64_t window_id, const char *label, size_t label_len, int kind, const char *parent, size_t parent_len, double x, double y, double width, double height, int layer, int visible, int enabled, const char *role, size_t role_len, const char *text, size_t text_len, const char *command, size_t command_len) {
+int zero_native_appkit_create_view(zero_native_appkit_host_t *host, uint64_t window_id, const char *label, size_t label_len, int kind, const char *parent, size_t parent_len, double x, double y, double width, double height, int layer, int visible, int enabled, const char *role, size_t role_len, const char *accessibility_label, size_t accessibility_label_len, const char *text, size_t text_len, const char *command, size_t command_len) {
     ZeroNativeAppKitHost *object = (__bridge ZeroNativeAppKitHost *)host;
     NSString *labelString = label ? [[NSString alloc] initWithBytes:label length:label_len encoding:NSUTF8StringEncoding] : @"";
     NSString *parentString = parent ? [[NSString alloc] initWithBytes:parent length:parent_len encoding:NSUTF8StringEncoding] : @"";
     NSString *roleString = role ? [[NSString alloc] initWithBytes:role length:role_len encoding:NSUTF8StringEncoding] : @"";
+    NSString *accessibilityLabelString = accessibility_label ? [[NSString alloc] initWithBytes:accessibility_label length:accessibility_label_len encoding:NSUTF8StringEncoding] : @"";
     NSString *textString = text ? [[NSString alloc] initWithBytes:text length:text_len encoding:NSUTF8StringEncoding] : @"";
     NSString *commandString = command ? [[NSString alloc] initWithBytes:command length:command_len encoding:NSUTF8StringEncoding] : @"";
-    return [object createNativeViewInWindow:window_id label:labelString ?: @"" kind:kind parent:parentString ?: @"" x:x y:y width:width height:height layer:layer visible:(visible != 0) enabled:(enabled != 0) role:roleString ?: @"" text:textString ?: @"" command:commandString ?: @""] ? 1 : 0;
+    return [object createNativeViewInWindow:window_id label:labelString ?: @"" kind:kind parent:parentString ?: @"" x:x y:y width:width height:height layer:layer visible:(visible != 0) enabled:(enabled != 0) role:roleString ?: @"" accessibilityLabel:accessibilityLabelString ?: @"" text:textString ?: @"" command:commandString ?: @""] ? 1 : 0;
 }
 
-int zero_native_appkit_update_view(zero_native_appkit_host_t *host, uint64_t window_id, const char *label, size_t label_len, int has_frame, double x, double y, double width, double height, int has_layer, int layer, int has_visible, int visible, int has_enabled, int enabled, int has_role, const char *role, size_t role_len, int has_text, const char *text, size_t text_len, int has_command, const char *command, size_t command_len) {
+int zero_native_appkit_update_view(zero_native_appkit_host_t *host, uint64_t window_id, const char *label, size_t label_len, int has_frame, double x, double y, double width, double height, int has_layer, int layer, int has_visible, int visible, int has_enabled, int enabled, int has_role, const char *role, size_t role_len, int has_accessibility_label, const char *accessibility_label, size_t accessibility_label_len, int has_text, const char *text, size_t text_len, int has_command, const char *command, size_t command_len) {
     ZeroNativeAppKitHost *object = (__bridge ZeroNativeAppKitHost *)host;
     NSString *labelString = label ? [[NSString alloc] initWithBytes:label length:label_len encoding:NSUTF8StringEncoding] : @"";
     NSString *roleString = role ? [[NSString alloc] initWithBytes:role length:role_len encoding:NSUTF8StringEncoding] : @"";
+    NSString *accessibilityLabelString = accessibility_label ? [[NSString alloc] initWithBytes:accessibility_label length:accessibility_label_len encoding:NSUTF8StringEncoding] : @"";
     NSString *textString = text ? [[NSString alloc] initWithBytes:text length:text_len encoding:NSUTF8StringEncoding] : @"";
     NSString *commandString = command ? [[NSString alloc] initWithBytes:command length:command_len encoding:NSUTF8StringEncoding] : @"";
-    return [object updateNativeViewInWindow:window_id label:labelString ?: @"" hasFrame:(has_frame != 0) x:x y:y width:width height:height hasLayer:(has_layer != 0) layer:layer hasVisible:(has_visible != 0) visible:(visible != 0) hasEnabled:(has_enabled != 0) enabled:(enabled != 0) hasRole:(has_role != 0) role:roleString ?: @"" hasText:(has_text != 0) text:textString ?: @"" hasCommand:(has_command != 0) command:commandString ?: @""] ? 1 : 0;
+    return [object updateNativeViewInWindow:window_id label:labelString ?: @"" hasFrame:(has_frame != 0) x:x y:y width:width height:height hasLayer:(has_layer != 0) layer:layer hasVisible:(has_visible != 0) visible:(visible != 0) hasEnabled:(has_enabled != 0) enabled:(enabled != 0) hasRole:(has_role != 0) role:roleString ?: @"" hasAccessibilityLabel:(has_accessibility_label != 0) accessibilityLabel:accessibilityLabelString ?: @"" hasText:(has_text != 0) text:textString ?: @"" hasCommand:(has_command != 0) command:commandString ?: @""] ? 1 : 0;
 }
 
 int zero_native_appkit_set_view_frame(zero_native_appkit_host_t *host, uint64_t window_id, const char *label, size_t label_len, double x, double y, double width, double height) {

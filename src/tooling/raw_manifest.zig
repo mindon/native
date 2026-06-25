@@ -112,6 +112,7 @@ pub const RawShellView = struct {
     visible: bool = true,
     enabled: bool = true,
     role: ?[]const u8 = null,
+    accessibility_label: ?[]const u8 = null,
     url: ?[]const u8 = null,
     text: ?[]const u8 = null,
     command: ?[]const u8 = null,

@@ -128,7 +128,7 @@ const tray_items = [_]zero_native.TrayMenuItem{
 };
 const shell_views = [_]zero_native.ShellView{
     .{ .label = "toolbar", .kind = .toolbar, .edge = .top, .height = toolbar_height, .layer = 20, .role = "Toolbar" },
-    .{ .label = "sync-button", .kind = .button, .parent = "toolbar", .x = 12, .y = 9, .width = 92, .height = 30, .layer = 21, .text = "Sync", .command = command_id },
+    .{ .label = "sync-button", .kind = .button, .parent = "toolbar", .x = 12, .y = 9, .width = 92, .height = 30, .layer = 21, .accessibility_label = "Sync now", .text = "Sync", .command = command_id },
     .{ .label = "main", .kind = .webview, .url = "zero://inline", .fill = true },
     .{ .label = "statusbar", .kind = .statusbar, .edge = .bottom, .height = statusbar_height, .layer = 20, .role = "Status" },
     .{ .label = "status-label", .kind = .label, .parent = "statusbar", .x = 14, .y = 8, .width = 620, .height = 18, .layer = 21, .text = "Ready. Use the toolbar, menu, tray, shortcut, or WebView button." },
