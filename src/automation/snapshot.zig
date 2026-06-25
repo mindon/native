@@ -44,12 +44,13 @@ pub fn writeText(input: Input, writer: anytype) !void {
     }
     for (input.views) |view| {
         try writer.print(
-            "  view @w{d}/{s} kind={s} role=\"{s}\" text=\"{s}\" bounds=({d},{d} {d}x{d}) layer={d} visible={any} enabled={any} focused={any} open={any}\n",
+            "  view @w{d}/{s} kind={s} role=\"{s}\" accessibility_label=\"{s}\" text=\"{s}\" bounds=({d},{d} {d}x{d}) layer={d} visible={any} enabled={any} focused={any} open={any}\n",
             .{
                 view.window_id,
                 view.label,
                 @tagName(view.kind),
                 view.role,
+                view.accessibility_label,
                 view.text,
                 view.frame.x,
                 view.frame.y,
@@ -82,7 +83,7 @@ pub fn writeA11yText(input: Input, writer: anytype) !void {
     }
     for (input.views) |view| {
         const role = if (view.role.len > 0) view.role else @tagName(view.kind);
-        const name = if (view.text.len > 0) view.text else view.label;
+        const name = if (view.accessibility_label.len > 0) view.accessibility_label else if (view.text.len > 0) view.text else view.label;
         try writer.print("@w{d}/{s} role={s} name=\"{s}\" bounds=({d},{d} {d}x{d})\n", .{
             view.window_id,
             view.label,
@@ -109,6 +110,7 @@ test "snapshot emits window and source" {
     try std.testing.expect(std.mem.indexOf(u8, writer.buffered(), "ready=true") != null);
     try std.testing.expect(std.mem.indexOf(u8, writer.buffered(), "@w1") != null);
     try std.testing.expect(std.mem.indexOf(u8, writer.buffered(), "view @w1/main kind=webview") != null);
+    try std.testing.expect(std.mem.indexOf(u8, writer.buffered(), "accessibility_label=\"\"") != null);
     try std.testing.expect(std.mem.indexOf(u8, writer.buffered(), "text=\"Main content\"") != null);
     try std.testing.expect(std.mem.indexOf(u8, writer.buffered(), "focused=true") != null);
     try std.testing.expect(std.mem.indexOf(u8, writer.buffered(), "source kind=html") != null);
@@ -124,4 +126,17 @@ test "accessibility snapshot uses visible view text as name" {
         .views = &views,
     }, &writer);
     try std.testing.expect(std.mem.indexOf(u8, writer.buffered(), "@w1/status role=status name=\"Ready\"") != null);
+}
+
+test "accessibility snapshot prefers explicit accessibility label" {
+    var buffer: [512]u8 = undefined;
+    var writer = std.Io.Writer.fixed(&buffer);
+    const windows = [_]Window{.{ .title = "Test", .bounds = geometry.RectF.init(0, 0, 100, 100) }};
+    const views = [_]platform.ViewInfo{.{ .label = "refresh-icon", .kind = .icon_button, .frame = geometry.RectF.init(0, 0, 30, 30), .role = "button", .accessibility_label = "Refresh workspace", .text = "R" }};
+    try writeA11yText(.{
+        .windows = &windows,
+        .views = &views,
+    }, &writer);
+    try std.testing.expect(std.mem.indexOf(u8, writer.buffered(), "@w1/refresh-icon role=button name=\"Refresh workspace\"") != null);
+    try std.testing.expect(std.mem.indexOf(u8, writer.buffered(), "name=\"R\"") == null);
 }
