@@ -224,8 +224,11 @@ pub fn validateMenuItem(item: MenuItem) Error!void {
     if (item.separator) return;
     if (item.label.len == 0 or item.label.len > max_menu_item_label_bytes) return error.InvalidMenuOptions;
     if (!isValidCommandId(item.command, max_menu_command_bytes)) return error.InvalidCommand;
-    if (item.key.len > 0 and !isValidShortcutKey(item.key)) return error.InvalidShortcut;
-    if (item.key.len > max_menu_key_bytes) return error.InvalidShortcut;
+    if (item.key.len > 0) {
+        if (!isValidShortcutKey(item.key)) return error.InvalidShortcut;
+        if (item.key.len > max_menu_key_bytes) return error.InvalidShortcut;
+        if (!item.modifiers.hasAny() and shortcutRequiresModifier(item.key)) return error.InvalidShortcut;
+    }
 }
 
 fn isValidCommandId(command: []const u8, max_len: usize) bool {
@@ -648,7 +651,7 @@ pub const Event = union(enum) {
     }
 };
 
-pub fn splitDropPaths(bytes: []const u8, output: [] []const u8) []const []const u8 {
+pub fn splitDropPaths(bytes: []const u8, output: [][]const u8) []const []const u8 {
     var count: usize = 0;
     var start: usize = 0;
     for (bytes, 0..) |ch, index| {
@@ -2099,6 +2102,10 @@ test "null platform records configured menus" {
     const invalid_item = [_]MenuItem{.{ .label = "Missing Command" }};
     const invalid_menu = [_]Menu{.{ .title = "Invalid", .items = &invalid_item }};
     try std.testing.expectError(error.InvalidCommand, null_platform.platform().services.configureMenus(&invalid_menu));
+
+    const unmodified_key_item = [_]MenuItem{.{ .label = "Refresh", .command = "app.refresh", .key = "r" }};
+    const unmodified_key_menu = [_]Menu{.{ .title = "Invalid", .items = &unmodified_key_item }};
+    try std.testing.expectError(error.InvalidShortcut, null_platform.platform().services.configureMenus(&unmodified_key_menu));
 }
 
 test "webview bridge fallback only routes main responses" {

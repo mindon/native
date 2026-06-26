@@ -5025,6 +5025,25 @@ test "runtime configures platform menus" {
     try std.testing.expectEqualStrings("app.refresh", harness.null_platform.configuredMenus()[0].items[0].command);
 }
 
+test "runtime rejects invalid platform menu shortcuts" {
+    const TestApp = struct {
+        fn app(self: *@This()) App {
+            return .{ .context = self, .name = "invalid-menus", .source = platform.WebViewSource.html("<h1>Menus</h1>") };
+        }
+    };
+
+    const items = [_]platform.MenuItem{
+        .{ .label = "Refresh", .command = "app.refresh", .key = "r" },
+    };
+    const menus = [_]platform.Menu{.{ .title = "View", .items = &items }};
+    var harness: TestHarness() = undefined;
+    harness.init(.{});
+    harness.runtime.options.menus = &menus;
+    var app_state: TestApp = .{};
+
+    try std.testing.expectError(error.InvalidShortcut, harness.runtime.run(app_state.app()));
+}
+
 test "runtime rejects invalid keyboard shortcuts" {
     const TestApp = struct {
         fn app(self: *@This()) App {
