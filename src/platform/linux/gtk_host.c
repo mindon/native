@@ -709,6 +709,17 @@ static char *zero_native_origin_for_uri(const char *uri) {
     return g_strndup(uri, (gsize)(host_end - uri));
 }
 
+static int zero_native_policy_wildcard_prefix_has_path(const char *prefix, size_t prefix_len) {
+    if (!prefix || prefix_len == 0) return 0;
+    const char *end = prefix + prefix_len;
+    const char *scheme_end = strstr(prefix, "://");
+    if (!scheme_end || scheme_end >= end) return 0;
+    const char *host_start = scheme_end + 3;
+    if (host_start >= end) return 0;
+    const char *slash = memchr(host_start, '/', (size_t)(end - host_start));
+    return slash && slash > host_start;
+}
+
 static int zero_native_policy_list_matches(char **values, int count, const char *uri) {
     char *origin = zero_native_origin_for_uri(uri);
     int matched = 0;
@@ -718,8 +729,8 @@ static int zero_native_policy_list_matches(char **values, int count, const char 
         if (strcmp(value, "*") == 0 || strcmp(value, origin) == 0 || (uri && strcmp(value, uri) == 0)) {
             matched = 1;
         } else if (len > 0 && value[len - 1] == '*') {
-            matched = uri && strncmp(uri, value, len - 1) == 0;
-            if (!matched) matched = strncmp(origin, value, len - 1) == 0;
+            size_t prefix_len = len - 1;
+            matched = uri && zero_native_policy_wildcard_prefix_has_path(value, prefix_len) && strncmp(uri, value, prefix_len) == 0;
         }
     }
     g_free(origin);

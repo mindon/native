@@ -2106,6 +2106,11 @@ static NSEventModifierFlags ZeroNativeMenuModifierFlags(uint32_t modifiers) {
     return flags;
 }
 
+static BOOL ZeroNativeWildcardPrefixHasPath(NSString *prefix) {
+    NSURLComponents *components = [NSURLComponents componentsWithString:prefix ?: @""];
+    return components.scheme.length > 0 && components.host.length > 0 && components.percentEncodedPath.length > 0;
+}
+
 static BOOL ZeroNativePolicyListMatches(NSArray<NSString *> *values, NSURL *url) {
     NSString *origin = ZeroNativeOriginForURL(url);
     NSString *absolute = url.absoluteString ?: @"";
@@ -2114,7 +2119,7 @@ static BOOL ZeroNativePolicyListMatches(NSArray<NSString *> *values, NSURL *url)
         if ([value isEqualToString:origin] || [value isEqualToString:absolute]) return YES;
         if ([value hasSuffix:@"*"]) {
             NSString *prefix = [value substringToIndex:value.length - 1];
-            if ([absolute hasPrefix:prefix] || [origin hasPrefix:prefix]) return YES;
+            if (ZeroNativeWildcardPrefixHasPath(prefix) && [absolute hasPrefix:prefix]) return YES;
         }
     }
     return NO;

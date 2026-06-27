@@ -717,13 +717,22 @@ static std::string mimeTypeForPath(const std::string &path) {
     return "application/octet-stream";
 }
 
+static bool policyWildcardPrefixHasPath(const std::string &prefix) {
+    size_t scheme_end = prefix.find("://");
+    if (scheme_end == std::string::npos) return false;
+    size_t host_start = scheme_end + 3;
+    if (host_start >= prefix.size()) return false;
+    size_t slash = prefix.find('/', host_start);
+    return slash != std::string::npos && slash > host_start;
+}
+
 static bool policyListMatches(const std::vector<std::string> &values, const std::string &url) {
     std::string origin = originForUrl(url);
     for (const std::string &value : values) {
         if (value == "*" || value == origin || value == url) return true;
         if (!value.empty() && value.back() == '*') {
             const std::string prefix = value.substr(0, value.size() - 1);
-            if (url.rfind(prefix, 0) == 0 || origin.rfind(prefix, 0) == 0) return true;
+            if (policyWildcardPrefixHasPath(prefix) && url.rfind(prefix, 0) == 0) return true;
         }
     }
     return false;

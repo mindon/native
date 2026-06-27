@@ -57,12 +57,26 @@ pub fn allowsExternalUrl(policy: ExternalLinkPolicy, url: []const u8) bool {
     for (policy.allowed_urls) |allowed| {
         if (std.mem.eql(u8, allowed, "*")) return true;
         if (std.mem.eql(u8, allowed, url)) return true;
-        if (std.mem.endsWith(u8, allowed, "*")) {
+        if (externalWildcardPrefixValid(allowed)) {
             const prefix = allowed[0 .. allowed.len - 1];
             if (std.mem.startsWith(u8, url, prefix)) return true;
         }
     }
     return false;
+}
+
+fn externalWildcardPrefixValid(pattern: []const u8) bool {
+    if (!std.mem.endsWith(u8, pattern, "*")) return false;
+    const prefix = pattern[0 .. pattern.len - 1];
+    const scheme = if (std.mem.startsWith(u8, prefix, "https://"))
+        "https://"
+    else if (std.mem.startsWith(u8, prefix, "http://"))
+        "http://"
+    else
+        return false;
+    const rest = prefix[scheme.len..];
+    const slash_index = std.mem.indexOfScalar(u8, rest, '/') orelse return false;
+    return slash_index > 0;
 }
 
 test "permission checks require every requested grant" {
@@ -93,4 +107,12 @@ test "external URL checks require open-browser action and allowed URL pattern" {
         .action = .open_system_browser,
         .allowed_urls = &.{"https://example.com/*"},
     }, "https://other.example/docs"));
+    try std.testing.expect(!allowsExternalUrl(.{
+        .action = .open_system_browser,
+        .allowed_urls = &.{"https://example.com/*"},
+    }, "https://example.com.evil/docs"));
+    try std.testing.expect(!allowsExternalUrl(.{
+        .action = .open_system_browser,
+        .allowed_urls = &.{"https://example.com*"},
+    }, "https://example.com.evil/docs"));
 }

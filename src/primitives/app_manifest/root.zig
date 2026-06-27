@@ -902,10 +902,27 @@ fn validateExternalUrlPattern(url: []const u8) ValidationError!void {
         const prefix = url[0 .. url.len - 1];
         if (prefix.len == 0) return error.InvalidUrl;
         if (std.mem.indexOfAny(u8, prefix, " \t\r\n\x00") != null) return error.InvalidUrl;
-        if (std.mem.startsWith(u8, prefix, "http://") or std.mem.startsWith(u8, prefix, "https://")) return;
-        return error.InvalidUrl;
+        try validateExternalWildcardPrefix(prefix);
+        return;
     }
     return validateUrl(url);
+}
+
+fn validateExternalWildcardPrefix(prefix: []const u8) ValidationError!void {
+    const prefix_len: usize = if (std.mem.startsWith(u8, prefix, "https://"))
+        "https://".len
+    else if (std.mem.startsWith(u8, prefix, "http://"))
+        "http://".len
+    else
+        return error.InvalidUrl;
+
+    const rest = prefix[prefix_len..];
+    const slash_index = std.mem.indexOfScalar(u8, rest, '/') orelse return error.InvalidUrl;
+    if (slash_index == 0) return error.InvalidUrl;
+    const host = rest[0..slash_index];
+    for (host) |ch| {
+        if (ch == 0 or ch == ' ' or ch == '\t' or ch == '\n' or ch == '\r') return error.InvalidUrl;
+    }
 }
 
 fn validateRelativePath(path: []const u8) ValidationError!void {
@@ -1667,6 +1684,7 @@ test "security validation catches invalid navigation and external policies" {
 
     try std.testing.expectError(error.InvalidUrl, validateSecurity(.{ .navigation = .{ .allowed_origins = &.{"bad origin"} } }));
     try std.testing.expectError(error.InvalidUrl, validateSecurity(.{ .navigation = .{ .external_links = .{ .allowed_urls = &.{"ssh://example.com"} } } }));
+    try std.testing.expectError(error.InvalidUrl, validateSecurity(.{ .navigation = .{ .external_links = .{ .allowed_urls = &.{"https://example.com*"} } } }));
 }
 
 test "package metadata validation catches empty authors and invalid keywords" {
