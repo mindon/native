@@ -284,6 +284,10 @@ pub const Runtime = struct {
         if (views.len > app_manifest.max_shell_views_per_window) return error.ViewLimitReached;
         try self.validateShellViewCreatePlan(window_id, views);
 
+        var main_state: RuntimeMainWebViewState = undefined;
+        try self.captureMainWebViewState(window_id, &main_state);
+        errdefer self.restoreMainWebViewState(window_id, &main_state) catch {};
+
         var created_labels: [app_manifest.max_shell_views_per_window][]const u8 = undefined;
         var created_count: usize = 0;
         errdefer self.rollbackCreatedShellViews(window_id, created_labels[0..created_count]);
@@ -386,6 +390,43 @@ pub const Runtime = struct {
             index -= 1;
             self.closeView(window_id, labels[index]) catch {};
         }
+    }
+
+    fn captureMainWebViewState(self: *Runtime, window_id: platform.WindowId, state: *RuntimeMainWebViewState) !void {
+        const index = self.findWindowIndexById(window_id) orelse return error.WindowNotFound;
+        const window = self.windows[index];
+        state.* = .{
+            .frame = window.main_frame,
+            .frame_set = window.main_frame_set,
+            .layer = window.main_layer,
+        };
+        state.parent = if (window.main_parent) |parent| try copyInto(&state.parent_storage, parent) else null;
+    }
+
+    fn restoreMainWebViewState(self: *Runtime, window_id: platform.WindowId, state: *const RuntimeMainWebViewState) !void {
+        const index = self.findWindowIndexById(window_id) orelse return error.WindowNotFound;
+        const window = self.windows[index];
+        var restore_error: ?anyerror = null;
+
+        if (window.source != null) {
+            if (window.main_frame_set != state.frame_set or !rectsEqual(window.main_frame, state.frame)) {
+                self.options.platform.services.setWebViewFrame(window_id, "main", state.frame) catch |err| {
+                    restore_error = err;
+                };
+            }
+            if (window.main_layer != state.layer) {
+                self.options.platform.services.setWebViewLayer(window_id, "main", state.layer) catch |err| {
+                    if (restore_error == null) restore_error = err;
+                };
+            }
+        }
+
+        self.windows[index].main_frame = state.frame;
+        self.windows[index].main_frame_set = state.frame_set;
+        self.windows[index].main_layer = state.layer;
+        self.windows[index].main_parent = if (state.parent) |parent| try copyInto(&self.windows[index].main_parent_storage, parent) else null;
+
+        if (restore_error) |err| return err;
     }
 
     pub fn createView(self: *Runtime, options: platform.ViewOptions) anyerror!platform.ViewInfo {
@@ -2592,6 +2633,14 @@ const RuntimeWindow = struct {
     source_storage: RuntimeSourceStorage = .{},
 };
 
+const RuntimeMainWebViewState = struct {
+    frame: geometry.RectF = geometry.RectF.init(0, 0, 0, 0),
+    frame_set: bool = false,
+    layer: i32 = 0,
+    parent: ?[]const u8 = null,
+    parent_storage: [platform.max_view_label_bytes]u8 = undefined,
+};
+
 const RuntimeSourceStorage = struct {
     bytes: [platform.max_window_source_bytes]u8 = undefined,
     asset_root_path: [platform.max_window_source_bytes]u8 = undefined,
@@ -4256,6 +4305,40 @@ test "runtime rolls back shell views when a later view fails" {
     const views = harness.runtime.listViews(1, &views_buffer);
     try std.testing.expectEqual(@as(usize, 1), views.len);
     try std.testing.expectEqualStrings("main", views[0].label);
+}
+
+test "runtime restores main webview state when shell creation fails after main update" {
+    const TestApp = struct {
+        fn app(self: *@This()) App {
+            return .{ .context = self, .name = "main-shell-rollback", .source = platform.WebViewSource.html("<h1>Hello</h1>") };
+        }
+    };
+
+    var harness: TestHarness() = undefined;
+    harness.init(.{ .id = 1, .size = geometry.SizeF.init(800, 600) });
+    var app_state: TestApp = .{};
+    try harness.start(app_state.app());
+
+    harness.runtime.windows[0].main_parent = try copyInto(&harness.runtime.windows[0].main_parent_storage, "existing-parent");
+    const previous_frame = harness.runtime.windows[0].main_frame;
+    const previous_frame_set = harness.runtime.windows[0].main_frame_set;
+    const previous_layer = harness.runtime.windows[0].main_layer;
+    const previous_parent = harness.runtime.windows[0].main_parent.?;
+
+    const shell_views = [_]app_manifest.ShellView{
+        .{ .label = "main", .kind = .webview, .fill = true, .layer = 7 },
+        .{ .label = "canvas", .kind = .gpu_surface, .width = 320, .height = 240 },
+    };
+
+    try std.testing.expectError(error.UnsupportedViewKind, harness.runtime.createShellViews(1, &shell_views, geometry.RectF.init(0, 0, 800, 600)));
+    try std.testing.expectEqual(previous_frame.x, harness.runtime.windows[0].main_frame.x);
+    try std.testing.expectEqual(previous_frame.y, harness.runtime.windows[0].main_frame.y);
+    try std.testing.expectEqual(previous_frame.width, harness.runtime.windows[0].main_frame.width);
+    try std.testing.expectEqual(previous_frame.height, harness.runtime.windows[0].main_frame.height);
+    try std.testing.expectEqual(previous_frame_set, harness.runtime.windows[0].main_frame_set);
+    try std.testing.expectEqual(previous_layer, harness.runtime.windows[0].main_layer);
+    try std.testing.expectEqualStrings(previous_parent, harness.runtime.windows[0].main_parent.?);
+    try std.testing.expectEqual(@as(usize, 0), harness.runtime.shell_layout_count);
 }
 
 test "runtime materializes manifest shell windows into laid out views" {
