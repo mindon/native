@@ -1,7 +1,7 @@
 const std = @import("std");
 const build_options = @import("build_options");
 const native_sdk = @import("native_sdk");
-const app_manifest = @import("app_manifest_zon");
+pub const app_manifest = @import("app_manifest_zon");
 const manifest_shortcuts = if (@hasField(@TypeOf(app_manifest), "shortcuts")) app_manifest.shortcuts else .{};
 const manifest_windows = if (@hasField(@TypeOf(app_manifest), "windows")) app_manifest.windows else .{};
 
