@@ -6,7 +6,7 @@ The `app.zon` manifest declares app metadata, permissions, security rules, windo
 
 The manifest `native init` generates — identity, one shell window with a GPU surface view, and the minimal permission set:
 
-```zig
+```zig:app.zon
 .{
     .id = "dev.native_sdk.my-app",
     .name = "my-app",
@@ -47,7 +47,7 @@ The manifest `native init` generates — identity, one shell window with a GPU s
 
 A fuller manifest for an app that also [embeds web content](/frontend) and declares commands, shortcuts, menus, and packaging metadata:
 
-```zig
+```zig:app.zon
 .{
     .id = "dev.native_sdk",
     .name = "native-sdk",
@@ -169,12 +169,24 @@ A fuller manifest for an app that also [embeds web content](/frontend) and decla
       <td><code>system</code> or <code>chromium</code>; Chromium is currently supported for macOS builds (see <a href="/web-engines">Web Engines</a>)</td>
     </tr>
     <tr>
+      <td><code>webview_layer</code></td>
+      <td><code>auto</code> (default), <code>include</code>, or <code>exclude</code> — whether the build ships the embedded web layer (see below)</td>
+    </tr>
+    <tr>
       <td><code>theme</code></td>
       <td>Built-in theme pack: <code>house</code> (default) or <code>geist</code>; an unknown name is a build/check error (see <a href="/theming">Theming</a>)</td>
     </tr>
     <tr>
+      <td><code>theme_accent</code></td>
+      <td>Optional <code>#rrggbb</code> accent layered over the pack — recolors the accent, its knockout ink, the focus ring, and the slider active range together; skipped under high contrast; a malformed value is a build/check error</td>
+    </tr>
+    <tr>
       <td><code>cef</code></td>
       <td>CEF runtime config for Chromium apps: <code>dir</code> and <code>auto_install</code></td>
+    </tr>
+    <tr>
+      <td><code>assets</code></td>
+      <td>Launch-registered assets for TypeScript-core apps: <code>images</code> entries (<code>.&#123; .id = 1, .path = "assets/art/cover.jpg" &#125;</code>) are read once at launch and registered on the installing frame; the <code>id</code> is the <code>ImageId</code> markup avatar bindings reference</td>
     </tr>
     <tr>
       <td><code>windows</code></td>
@@ -210,6 +222,19 @@ A fuller manifest for an app that also [embeds web content](/frontend) and decla
     </tr>
   </tbody>
 </table>
+
+## `webview_layer`
+
+Under the default `auto`, the build infers whether to ship the embedded web layer from what the app declares: `"webview"` in `.capabilities`, a `.frontend` block, a `.shell` webview view, or a web engine resolved to Chromium (from `.web_engine` or the `-Dweb-engine`/`--web-engine` flags) each count as web intent, and an app with none of them builds native-only. `include` forces the layer into a build that declares nothing yet; `exclude` promises a native-only app. The `-Dweb-layer` build option overrides the manifest setting for one build.
+
+A native-only build carries the platform consequences with it: on Windows the executable never references `WebView2Loader.dll` and no loader ships in the package; on Linux the host compiles and links without WebKitGTK entirely, so building needs no WebKitGTK development package and users need no `libwebkitgtk` installed at runtime.
+
+`exclude` alongside any web declaration is a contradiction, refused with a teaching error at validate, build, and package time instead of shipping an app whose declared webviews cannot work:
+
+```zig
+.capabilities = .{"webview"},
+.webview_layer = "exclude", // rejected: remove the web declarations or drop the exclude
+```
 
 ## `shell`
 

@@ -114,9 +114,12 @@ pub const CanvasWidgetSemanticsIndex = CanvasWidgetIdIndex(canvas.WidgetSemantic
 /// Shared per-pass index scratch (~8 KiB of slots per table). The two
 /// reconcile passes per rebuild (the staged reconcile, then the retained
 /// copy) run back-to-back on the single-threaded event loop and each
-/// rebuilds every table it uses, so one threadlocal set serves both —
-/// the same pattern as the planners' probe-table scratch.
-pub threadlocal var canvas_widget_reconcile_index_scratch: CanvasWidgetReconcileIndexScratch = .{};
+/// rebuilds every table it uses, so one per-thread set serves both —
+/// the same pattern as the planners' probe-table scratch. Lazily
+/// heap-allocated (~32 KiB) on a thread's first reconcile, so threads
+/// that never reconcile widgets never carry it in their static TLS
+/// block.
+pub const canvas_widget_reconcile_index_scratch = canvas.lazy_tls.LazyTls(CanvasWidgetReconcileIndexScratch);
 
 pub const CanvasWidgetReconcileIndexScratch = struct {
     controls: CanvasWidgetControlEntryIndex = .{},
@@ -700,7 +703,13 @@ pub fn canvasWidgetLayoutNodeWithTextReconcileState(
         const source_matches_runtime_text = std.mem.eql(u8, entry.text, copy.widget.text);
         if (!source_unchanged and !source_matches_runtime_text) return copy;
         if (source_unchanged) copy.widget.text = entry.text;
-        if (copy.widget.kind == .textarea) copy.widget.value = entry.value;
+        // The retained scroll offset rides `value` for every editable
+        // text kind: the textarea's vertical offset and the single-line
+        // field's horizontal one both survive rebuilds through this
+        // restore (and re-clamp in `clampCanvasWidgetLayoutTextOffsets`
+        // right after, so a resized or re-texted field never keeps a
+        // stale offset).
+        if (canvasWidgetEditableTextKind(copy.widget.kind)) copy.widget.value = entry.value;
         if (copy.widget.text_selection == null and copy.widget.text_composition == null) {
             copy.widget.text_selection = entry.text_selection;
             copy.widget.text_composition = entry.text_composition;
@@ -819,7 +828,7 @@ pub fn canvasWidgetLayoutTreeWithRuntimeReconcileState(
     // mid-rubber-band must not clamp an offset the OS scroller owns.
     restoreCanvasWidgetLayoutScrollOffsets(staged_nodes, previous_runtime_offsets, previous_source_scroll_entries);
 
-    const index_scratch = &canvas_widget_reconcile_index_scratch;
+    const index_scratch = canvas_widget_reconcile_index_scratch.get();
     index_scratch.controls.build(previous_control_states);
     index_scratch.source_controls.build(previous_source_control_entries);
     index_scratch.texts.build(previous_text_states);
@@ -903,8 +912,22 @@ pub fn clampCanvasWidgetLayoutScrollOffsets(nodes: []canvas.WidgetLayoutNode, st
 
 pub fn clampCanvasWidgetLayoutTextOffsets(nodes: []canvas.WidgetLayoutNode, tokens: canvas.DesignTokens) void {
     for (nodes) |*node| {
-        if (node.widget.kind != .textarea) continue;
-        node.widget.value = canvas.clampedTextInputScrollOffsetForWidget(node.widget, tokens, node.widget.value);
+        if (node.widget.kind == .textarea) {
+            node.widget.value = canvas.clampedTextInputScrollOffsetForWidget(node.widget, tokens, node.widget.value);
+            continue;
+        }
+        if (!canvasWidgetSingleLineTextKind(node.widget.kind)) continue;
+        // Single-line fields clamp their horizontal offset against the
+        // just-reconciled text and frame, and a field holding a caret
+        // also keeps it inside the visible span — this is where a layout
+        // width change (a resized window narrowing the field) is first
+        // known, so the caret never strands outside the clip after a
+        // resize. Deterministic in retained state: the offset only moves
+        // when the clamp or the caret demands it.
+        node.widget.value = if (node.widget.text_selection != null)
+            canvas.textInputCaretVisibleScrollOffsetForWidget(node.widget, tokens, node.widget.value)
+        else
+            canvas.clampedTextInputHorizontalScrollOffsetForWidget(node.widget, tokens, node.widget.value);
     }
 }
 

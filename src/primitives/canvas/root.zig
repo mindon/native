@@ -370,6 +370,7 @@ pub const PixelSnapTokenOverrides = token_model.PixelSnapTokenOverrides;
 pub const ControlVisualTokenOverrides = token_model.ControlVisualTokenOverrides;
 pub const ControlTokenOverrides = token_model.ControlTokenOverrides;
 pub const DesignTokenOverrides = token_model.DesignTokenOverrides;
+pub const accentOverrides = token_model.accentOverrides;
 pub const DesignTokens = token_model.DesignTokens;
 
 // Canvas widget model and built-in factories live in `widgets.zig`; root keeps the public API stable.
@@ -468,6 +469,11 @@ pub const markdown = @import("markdown.zig");
 // Deterministic key-lookup scratch shared by the per-frame planners and
 // the runtime's keyed diffs (see plan_key_index.zig).
 pub const plan_key_index = @import("plan_key_index.zig");
+
+// Lazily heap-allocated per-thread scratch: keeps the large planner
+// buffers out of the static TLS template every OS thread must clone
+// (see lazy_tls.zig for the working-set numbers).
+pub const lazy_tls = @import("lazy_tls.zig");
 
 // Experimental markup front-end lives in `ui_markup.zig` / `ui_markup_view.zig`
 // (runtime parse + interpret: the dev/hot-reload engine) and
@@ -631,6 +637,9 @@ pub const textInputClearButtonHitRect = widget_runtime.textInputClearButtonHitRe
 pub const textInputContentExtentForWidget = widget_runtime.textInputContentExtentForWidget;
 pub const textInputMaxScrollOffsetForWidget = widget_runtime.textInputMaxScrollOffsetForWidget;
 pub const clampedTextInputScrollOffsetForWidget = widget_runtime.clampedTextInputScrollOffsetForWidget;
+pub const textInputMaxHorizontalScrollOffsetForWidget = widget_runtime.textInputMaxHorizontalScrollOffsetForWidget;
+pub const clampedTextInputHorizontalScrollOffsetForWidget = widget_runtime.clampedTextInputHorizontalScrollOffsetForWidget;
+pub const textInputCaretVisibleScrollOffsetForWidget = widget_runtime.textInputCaretVisibleScrollOffsetForWidget;
 pub const intrinsicWidgetSize = widget_runtime.intrinsicWidgetSize;
 pub const cursorForWidgetHit = widget_runtime.cursorForWidgetHit;
 pub const cursorForWidgetTarget = widget_runtime.cursorForWidgetTarget;

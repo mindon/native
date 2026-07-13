@@ -1,7 +1,6 @@
 #include "gtk_host.h"
 
 #include <gtk/gtk.h>
-#include <webkit/webkit.h>
 #include <glib/gstdio.h>
 #include <dlfcn.h>
 #include <limits.h>
@@ -10,6 +9,39 @@
 #include <string.h>
 #include <stdlib.h>
 #include <stdio.h>
+
+/* NATIVE_SDK_ALLOW_WEBKITGTK_STUB is the build graph's declaration that
+ * this app uses no web layer, and it wins over header visibility: on a
+ * machine with the WebKitGTK development package installed, testing
+ * __has_include first would compile the full embedded-web layer into a
+ * native-only build and reintroduce the libwebkitgtk link its executable
+ * must not carry (canvas apps are unaffected by the stub). Without the
+ * define the header is required: every web-declaring build graph links
+ * webkitgtk-6.0 (whose pkg-config flags provide the include path), so a
+ * web build that cannot see it is misconfigured — fail it loudly instead
+ * of shipping a host whose WebView loads report WebViewNotFound at
+ * runtime. The same seam as the Windows host's
+ * NATIVE_SDK_ALLOW_WEBVIEW2_STUB. */
+#if defined(NATIVE_SDK_ALLOW_WEBKITGTK_STUB)
+#define NATIVE_SDK_HAS_WEBKITGTK 0
+#pragma message("Embedded web layer excluded by the build configuration: building the GTK host without WebKitGTK (canvas apps unaffected; WebView loads will report WebViewNotFound)")
+/* The stubbed web layer keeps the window/webview bookkeeping SHAPE so
+ * every GTK-only path (overlay reordering, focus lookups, window
+ * teardown) compiles unchanged: the web-view pointers below are opaque
+ * and permanently NULL — every path that could create one is compiled
+ * out — so the NULL checks that already guard the lazy main WebView
+ * also guard the compiled-out layer. These are LOCAL opaque types, not
+ * WebKitGTK declarations: no header, no webkit_* symbol, and no
+ * libwebkitgtk DT_NEEDED entry survives into the binary
+ * (tools/audit_web_layer.zig pins that on the built executable). */
+typedef struct native_sdk_absent_web_view WebKitWebView;
+typedef struct native_sdk_absent_content_manager WebKitUserContentManager;
+#elif __has_include(<webkit/webkit.h>)
+#include <webkit/webkit.h>
+#define NATIVE_SDK_HAS_WEBKITGTK 1
+#else
+#error "webkit/webkit.h not found: install the WebKitGTK 6.0 development package (libwebkitgtk-6.0-dev on Debian/Ubuntu), or define NATIVE_SDK_ALLOW_WEBKITGTK_STUB to build without the embedded web layer"
+#endif
 
 #define NATIVE_SDK_MAX_WINDOWS 16
 #define NATIVE_SDK_MAX_WEBVIEWS 16
@@ -405,6 +437,7 @@ static void native_sdk_clear_window_source(native_sdk_gtk_window_t *win) {
     win->spa_fallback = 0;
 }
 
+#if NATIVE_SDK_HAS_WEBKITGTK
 static int native_sdk_strings_equal(const char *a, const char *b) {
     return a && b && strcmp(a, b) == 0;
 }
@@ -484,6 +517,7 @@ static void native_sdk_apply_webview_frame(native_sdk_gtk_webview_t *webview) {
     gtk_widget_set_margin_top(widget, native_sdk_webview_coord(webview->y));
     gtk_widget_set_size_request(widget, native_sdk_webview_extent(webview->width), native_sdk_webview_extent(webview->height));
 }
+#endif /* NATIVE_SDK_HAS_WEBKITGTK */
 
 static int native_sdk_valid_native_view_frame(double x, double y, double width, double height) {
     return x >= 0 && y >= 0 && width >= 0 && height >= 0;
@@ -1622,6 +1656,7 @@ static int native_sdk_policy_list_matches(char **values, int count, const char *
     return matched;
 }
 
+#if NATIVE_SDK_HAS_WEBKITGTK
 static int native_sdk_path_is_safe(const char *path) {
     if (!path || !path[0]) return 0;
     if (path[0] == '/' || strchr(path, '\\')) return 0;
@@ -1882,6 +1917,7 @@ static void native_sdk_asset_scheme_request(WebKitURISchemeRequest *request, gpo
     g_free(path);
     g_free(relative);
 }
+#endif /* NATIVE_SDK_HAS_WEBKITGTK */
 
 static native_sdk_gtk_window_t *native_sdk_find_window(native_sdk_gtk_host_t *host, uint64_t id) {
     for (int i = 0; i < host->window_count; i++) {
@@ -2385,6 +2421,7 @@ static gboolean on_close_request(GtkWindow *window, gpointer data) {
     return FALSE;
 }
 
+#if NATIVE_SDK_HAS_WEBKITGTK
 static const char *native_sdk_decision_uri(WebKitPolicyDecision *decision, WebKitPolicyDecisionType type) {
     if (type != WEBKIT_POLICY_DECISION_TYPE_NAVIGATION_ACTION) return NULL;
     WebKitNavigationPolicyDecision *navigation = WEBKIT_NAVIGATION_POLICY_DECISION(decision);
@@ -2392,6 +2429,7 @@ static const char *native_sdk_decision_uri(WebKitPolicyDecision *decision, WebKi
     WebKitURIRequest *request = action ? webkit_navigation_action_get_request(action) : NULL;
     return request ? webkit_uri_request_get_uri(request) : NULL;
 }
+#endif /* NATIVE_SDK_HAS_WEBKITGTK */
 
 #if GTK_CHECK_VERSION(4, 10, 0)
 static void native_sdk_uri_launch_done(GObject *source_object, GAsyncResult *result, gpointer data) {
@@ -2417,6 +2455,7 @@ static void native_sdk_open_external_uri(GtkWindow *parent, const char *uri) {
 #endif
 }
 
+#if NATIVE_SDK_HAS_WEBKITGTK
 static gboolean on_decide_policy(WebKitWebView *web_view, WebKitPolicyDecision *decision, WebKitPolicyDecisionType type, gpointer data) {
     (void)web_view;
     native_sdk_gtk_window_t *win = data;
@@ -2487,7 +2526,11 @@ static void on_bridge_message(WebKitUserContentManager *manager, JSCValue *js_re
             }
         }
     }
-    const char *uri = webkit_web_view_get_uri(source_webview);
+    /* source_webview is NULL only if the sending manager matched nothing
+     * (a message can only originate from a WebView this host created, so
+     * this is belt-and-braces); origin_for_uri already maps NULL to the
+     * inline origin. */
+    const char *uri = source_webview ? webkit_web_view_get_uri(source_webview) : NULL;
     char *computed_origin = win->bridge_origin && strcmp(label, "main") == 0 ? g_strdup(win->bridge_origin) : native_sdk_origin_for_uri(uri);
     host->bridge_callback(host->bridge_context, win->id, label, strlen(label), message, strlen(message), computed_origin, strlen(computed_origin));
     g_free(computed_origin);
@@ -2507,6 +2550,52 @@ static void native_sdk_setup_bridge(native_sdk_gtk_window_t *win) {
     webkit_user_content_manager_add_script(manager, script);
     webkit_user_script_unref(script);
 }
+
+/* The zero:// custom scheme lives on the WebKitWebContext (every WebView
+ * this host creates shares the default context) and WebKit aborts on a
+ * second registration, so the first WebView actually created — window
+ * main or child, whichever an app reaches first — registers it and the
+ * host-level flag makes every later creation a no-op. */
+static void native_sdk_register_zero_scheme(native_sdk_gtk_host_t *host, WebKitWebView *web_view) {
+    if (!host || host->scheme_registered || !web_view) return;
+    webkit_web_context_register_uri_scheme(webkit_web_view_get_context(web_view), "zero", native_sdk_asset_scheme_request, host, NULL);
+    host->scheme_registered = 1;
+}
+
+/* Create-on-first-use for a window's main WebView (the AppKit host's
+ * ensureMainWebViewForWindowId:). Pure peek reads (event emission,
+ * bridge completion echoes, reorder passes, focus) keep checking
+ * win->web_view and skip absent WebViews — a page that was never created
+ * has no listeners to miss. Paths that MATERIALIZE web content (load,
+ * frame/zoom/layer placement) ensure first, so webview-first apps behave
+ * exactly as before while canvas-first apps never boot the out-of-process
+ * WebKit stack (web + network helper processes) at all. */
+static WebKitWebView *native_sdk_ensure_main_webview(native_sdk_gtk_window_t *win) {
+    if (!win) return NULL;
+    if (win->web_view) return win->web_view;
+    if (!win->stack_root) return NULL;
+
+    win->content_manager = webkit_user_content_manager_new();
+    WebKitWebView *wv = WEBKIT_WEB_VIEW(
+        g_object_new(WEBKIT_TYPE_WEB_VIEW,
+            "user-content-manager", win->content_manager,
+            NULL));
+    win->web_view = wv;
+    native_sdk_register_zero_scheme(win->host, wv);
+    native_sdk_setup_bridge(win);
+    g_signal_connect(wv, "decide-policy", G_CALLBACK(on_decide_policy), win);
+
+    /* The overlay's main-child slot, where the eager create used to put
+     * it: the overlay allocates its main child the full stack area on the
+     * next layout pass, so materializing into an already-shown window
+     * sizes correctly like any other GTK4 child insertion. The reorder
+     * pass settles the sibling (paint) order among child views exactly
+     * like any other webview mutation. */
+    gtk_overlay_set_child(GTK_OVERLAY(win->stack_root), GTK_WIDGET(wv));
+    native_sdk_reorder_overlays(win);
+    return wv;
+}
+#endif /* NATIVE_SDK_HAS_WEBKITGTK */
 
 static native_sdk_gtk_window_t *native_sdk_create_window_internal(native_sdk_gtk_host_t *host, uint64_t window_id, const char *title, const char *label, double x, double y, double width, double height, int restore_frame, int resizable, int titlebar_style, double min_width, double min_height) {
     if (native_sdk_find_window(host, window_id)) return NULL;
@@ -2591,18 +2680,11 @@ static native_sdk_gtk_window_t *native_sdk_create_window_internal(native_sdk_gtk
         g_signal_connect(bar, "map", G_CALLBACK(native_sdk_on_header_bar_mapped), win->host);
     }
 
-    win->content_manager = webkit_user_content_manager_new();
-    WebKitWebView *wv = WEBKIT_WEB_VIEW(
-        g_object_new(WEBKIT_TYPE_WEB_VIEW,
-            "user-content-manager", win->content_manager,
-            NULL));
-    win->web_view = wv;
-    if (!host->scheme_registered) {
-        webkit_web_context_register_uri_scheme(webkit_web_view_get_context(wv), "zero", native_sdk_asset_scheme_request, host, NULL);
-        host->scheme_registered = 1;
-    }
-    native_sdk_setup_bridge(win);
-
+    /* The window's main WebView is NOT created here: it materializes on
+     * first use (native_sdk_ensure_main_webview), because instantiating
+     * a WebKitWebView boots the whole out-of-process WebKit stack — web
+     * and network helper processes — that a canvas-first app would carry
+     * forever under a view it never shows. */
     win->root_box = gtk_box_new(GTK_ORIENTATION_VERTICAL, 0);
     /* Declared content min-size floor: the size request on the content
      * box floors user resizes without inflating the default size (the
@@ -2617,10 +2699,13 @@ static native_sdk_gtk_window_t *native_sdk_create_window_internal(native_sdk_gtk
     gtk_widget_set_visible(win->menu_bar, host->menu_model != NULL);
     gtk_box_append(GTK_BOX(win->root_box), win->menu_bar);
 
+    /* The overlay expands to fill the window on its own (hexpand/vexpand
+     * on an expanding box slot), so it needs no main child to claim the
+     * stack area — the lazy WebView slots in later without a relayout of
+     * anything else. */
     win->stack_root = gtk_overlay_new();
     gtk_widget_set_hexpand(win->stack_root, TRUE);
     gtk_widget_set_vexpand(win->stack_root, TRUE);
-    gtk_overlay_set_child(GTK_OVERLAY(win->stack_root), GTK_WIDGET(wv));
     gtk_box_append(GTK_BOX(win->root_box), win->stack_root);
     gtk_window_set_child(win->gtk_window, win->root_box);
     native_sdk_install_file_drop_target(win);
@@ -2629,7 +2714,6 @@ static native_sdk_gtk_window_t *native_sdk_create_window_internal(native_sdk_gtk
     g_signal_connect(win->gtk_window, "notify::default-height", G_CALLBACK(on_resize), win);
     g_signal_connect(win->gtk_window, "notify::is-active", G_CALLBACK(on_focus), win);
     g_signal_connect(win->gtk_window, "close-request", G_CALLBACK(on_close_request), win);
-    g_signal_connect(win->web_view, "decide-policy", G_CALLBACK(on_decide_policy), win);
     GtkEventController *shortcut_controller = gtk_event_controller_key_new();
     gtk_event_controller_set_propagation_phase(shortcut_controller, GTK_PHASE_CAPTURE);
     g_signal_connect(shortcut_controller, "key-pressed", G_CALLBACK(on_shortcut_key_pressed), win);
@@ -2847,8 +2931,31 @@ void native_sdk_gtk_load_webview(native_sdk_gtk_host_t *host, const char *source
 }
 
 void native_sdk_gtk_load_window_webview(native_sdk_gtk_host_t *host, uint64_t window_id, const char *source, size_t source_len, int source_kind, const char *asset_root, size_t asset_root_len, const char *asset_entry, size_t asset_entry_len, const char *asset_origin, size_t asset_origin_len, int spa_fallback) {
+#if !NATIVE_SDK_HAS_WEBKITGTK
+    /* Web layer compiled out: the runtime's web-layer gate answers every
+     * webview path with error.WebViewLayerNotBuilt before it can reach
+     * the host, so this stub (like the Windows host's) is belt-and-braces
+     * for a caller that bypassed the gate — a quiet no-op, never a
+     * half-started WebKit stack. */
+    (void)host;
+    (void)window_id;
+    (void)source;
+    (void)source_len;
+    (void)source_kind;
+    (void)asset_root;
+    (void)asset_root_len;
+    (void)asset_entry;
+    (void)asset_entry_len;
+    (void)asset_origin;
+    (void)asset_origin_len;
+    (void)spa_fallback;
+#else
     native_sdk_gtk_window_t *win = native_sdk_find_window(host, window_id);
-    if (!win || !win->web_view) return;
+    /* Loading a source is what materializes the window's lazy main
+     * WebView; the runtime never issues a load for a canvas-first app
+     * with the default empty source (sceneNeedsMainWebView), so a window
+     * that never reaches here never starts WebKit. */
+    if (!win || !native_sdk_ensure_main_webview(win)) return;
 
     char *src = native_sdk_strndup(source, source_len);
     if (!src) return;
@@ -2899,6 +3006,7 @@ void native_sdk_gtk_load_window_webview(native_sdk_gtk_host_t *host, uint64_t wi
         webkit_web_view_load_html(win->web_view, src, "zero://inline");
     }
     free(src);
+#endif
 }
 
 void native_sdk_gtk_set_bridge_callback(native_sdk_gtk_host_t *host, native_sdk_gtk_bridge_callback_t callback, void *context) {
@@ -2915,12 +3023,25 @@ void native_sdk_gtk_bridge_respond_window(native_sdk_gtk_host_t *host, uint64_t 
 }
 
 void native_sdk_gtk_bridge_respond_webview(native_sdk_gtk_host_t *host, uint64_t window_id, const char *webview_label, size_t webview_label_len, const char *response, size_t response_len) {
+#if !NATIVE_SDK_HAS_WEBKITGTK
+    /* No web layer, no page that could have sent the request. */
+    (void)host;
+    (void)window_id;
+    (void)webview_label;
+    (void)webview_label_len;
+    (void)response;
+    (void)response_len;
+#else
     native_sdk_gtk_window_t *win = native_sdk_find_window(host, window_id);
-    if (!win || !win->web_view) return;
+    if (!win) return;
     char *label = webview_label_len > 0 ? native_sdk_strndup(webview_label, webview_label_len) : native_sdk_strndup("main", 4);
     if (!label) return;
     WebKitWebView *target = NULL;
     if (strcmp(label, "main") == 0) {
+        /* Peek, never ensure: a completion can only answer a request a
+         * live page sent, so a still-lazy main WebView has nothing to
+         * deliver to (and a child webview's response must not be dropped
+         * just because the window's main WebView never materialized). */
         target = win->web_view;
     } else {
         native_sdk_gtk_webview_t *webview = native_sdk_find_webview(win, label);
@@ -2945,10 +3066,22 @@ void native_sdk_gtk_bridge_respond_webview(native_sdk_gtk_host_t *host, uint64_t
         free(script);
     }
     free(resp);
+#endif
 }
 
 void native_sdk_gtk_emit_window_event(native_sdk_gtk_host_t *host, uint64_t window_id, const char *name, size_t name_len, const char *detail_json, size_t detail_json_len) {
+#if !NATIVE_SDK_HAS_WEBKITGTK
+    /* No web layer, no page with listeners to miss. */
+    (void)host;
+    (void)window_id;
+    (void)name;
+    (void)name_len;
+    (void)detail_json;
+    (void)detail_json_len;
+#else
     native_sdk_gtk_window_t *win = native_sdk_find_window(host, window_id);
+    /* Peek, never ensure: a still-lazy main WebView has no page and so
+     * no listeners to miss. */
     if (!win || !win->web_view) return;
     char *event_name = native_sdk_strndup(name, name_len);
     char *detail = native_sdk_strndup(detail_json, detail_json_len);
@@ -2970,6 +3103,7 @@ void native_sdk_gtk_emit_window_event(native_sdk_gtk_host_t *host, uint64_t wind
     g_string_free(script, TRUE);
     free(event_name);
     free(detail);
+#endif
 }
 
 void native_sdk_gtk_set_security_policy(native_sdk_gtk_host_t *host, const char *allowed_origins, size_t allowed_origins_len, const char *external_urls, size_t external_urls_len, int external_action) {
@@ -3538,6 +3672,8 @@ int native_sdk_gtk_focus_view(native_sdk_gtk_host_t *host, uint64_t window_id, c
         return 0;
     }
     if (label_copy && strcmp(label_copy, "main") == 0) {
+        /* Peek, never ensure: focusing cannot mean "start a web page",
+         * so a still-lazy main WebView is an honest failure. */
         GtkWidget *widget = win->web_view ? GTK_WIDGET(win->web_view) : NULL;
         free(label_copy);
         if (!widget || !gtk_widget_get_visible(widget) || !gtk_widget_get_sensitive(widget)) return 0;
@@ -3568,6 +3704,24 @@ int native_sdk_gtk_close_view(native_sdk_gtk_host_t *host, uint64_t window_id, c
 }
 
 int native_sdk_gtk_create_webview(native_sdk_gtk_host_t *host, uint64_t window_id, const char *label, size_t label_len, const char *url, size_t url_len, double x, double y, double width, double height, int layer, int transparent, int bridge_enabled) {
+#if !NATIVE_SDK_HAS_WEBKITGTK
+    /* Web layer compiled out: creation honestly fails (the runtime's
+     * gate reports error.WebViewLayerNotBuilt before ever calling in). */
+    (void)host;
+    (void)window_id;
+    (void)label;
+    (void)label_len;
+    (void)url;
+    (void)url_len;
+    (void)x;
+    (void)y;
+    (void)width;
+    (void)height;
+    (void)layer;
+    (void)transparent;
+    (void)bridge_enabled;
+    return 0;
+#else
     native_sdk_gtk_window_t *win = native_sdk_find_window(host, window_id);
     if (!win || !win->stack_root || label_len == 0 || url_len == 0 || !native_sdk_valid_webview_frame(x, y, width, height)) return 0;
     if (win->webview_count >= NATIVE_SDK_MAX_WEBVIEWS) return 0;
@@ -3607,6 +3761,11 @@ int native_sdk_gtk_create_webview(native_sdk_gtk_host_t *host, uint64_t window_i
         free(url_copy);
         return 0;
     }
+    /* A child webview can be the FIRST WebView a canvas-first app ever
+     * creates (the window's main WebView stays lazy), so it must be able
+     * to claim the zero:// scheme registration itself before its first
+     * load resolves an asset URL. */
+    native_sdk_register_zero_scheme(host, web_view);
 
     native_sdk_gtk_webview_t *webview = &win->webviews[win->webview_count++];
     memset(webview, 0, sizeof(*webview));
@@ -3631,12 +3790,27 @@ int native_sdk_gtk_create_webview(native_sdk_gtk_host_t *host, uint64_t window_i
     webkit_web_view_load_uri(web_view, url_copy);
     free(url_copy);
     return 1;
+#endif
 }
 
 int native_sdk_gtk_set_webview_frame(native_sdk_gtk_host_t *host, uint64_t window_id, const char *label, size_t label_len, double x, double y, double width, double height) {
+#if !NATIVE_SDK_HAS_WEBKITGTK
+    (void)host;
+    (void)window_id;
+    (void)label;
+    (void)label_len;
+    (void)x;
+    (void)y;
+    (void)width;
+    (void)height;
+    return 0;
+#else
     native_sdk_gtk_window_t *win = native_sdk_find_window(host, window_id);
     char *label_copy = label_len > 0 ? native_sdk_strndup(label, label_len) : NULL;
-    if (label_copy && strcmp(label_copy, "main") == 0 && win && win->web_view && native_sdk_valid_webview_frame(x, y, width, height)) {
+    /* Placing the main WebView is a materializing operation (the AppKit
+     * host's setWebViewFrameInWindow: ensures the same way): the runtime
+     * only positions "main" for scenes that declare a main webview view. */
+    if (label_copy && strcmp(label_copy, "main") == 0 && native_sdk_valid_webview_frame(x, y, width, height) && native_sdk_ensure_main_webview(win)) {
         GtkWidget *widget = GTK_WIDGET(win->web_view);
         gtk_widget_set_halign(widget, GTK_ALIGN_START);
         gtk_widget_set_valign(widget, GTK_ALIGN_START);
@@ -3655,9 +3829,19 @@ int native_sdk_gtk_set_webview_frame(native_sdk_gtk_host_t *host, uint64_t windo
     webview->height = height;
     native_sdk_apply_webview_frame(webview);
     return 1;
+#endif
 }
 
 int native_sdk_gtk_navigate_webview(native_sdk_gtk_host_t *host, uint64_t window_id, const char *label, size_t label_len, const char *url, size_t url_len) {
+#if !NATIVE_SDK_HAS_WEBKITGTK
+    (void)host;
+    (void)window_id;
+    (void)label;
+    (void)label_len;
+    (void)url;
+    (void)url_len;
+    return 0;
+#else
     native_sdk_gtk_window_t *win = native_sdk_find_window(host, window_id);
     char *label_copy = label_len > 0 ? native_sdk_strndup(label, label_len) : NULL;
     char *url_copy = url_len > 0 ? native_sdk_strndup(url, url_len) : NULL;
@@ -3671,12 +3855,21 @@ int native_sdk_gtk_navigate_webview(native_sdk_gtk_host_t *host, uint64_t window
     free(label_copy);
     free(url_copy);
     return 1;
+#endif
 }
 
 int native_sdk_gtk_set_webview_zoom(native_sdk_gtk_host_t *host, uint64_t window_id, const char *label, size_t label_len, double zoom) {
+#if !NATIVE_SDK_HAS_WEBKITGTK
+    (void)host;
+    (void)window_id;
+    (void)label;
+    (void)label_len;
+    (void)zoom;
+    return 0;
+#else
     native_sdk_gtk_window_t *win = native_sdk_find_window(host, window_id);
     char *label_copy = label_len > 0 ? native_sdk_strndup(label, label_len) : NULL;
-    if (label_copy && strcmp(label_copy, "main") == 0 && win && win->web_view && zoom >= 0.25 && zoom <= 5.0) {
+    if (label_copy && strcmp(label_copy, "main") == 0 && zoom >= 0.25 && zoom <= 5.0 && native_sdk_ensure_main_webview(win)) {
         webkit_web_view_set_zoom_level(win->web_view, zoom);
         free(label_copy);
         return 1;
@@ -3686,12 +3879,21 @@ int native_sdk_gtk_set_webview_zoom(native_sdk_gtk_host_t *host, uint64_t window
     if (!webview || !webview->web_view || zoom < 0.25 || zoom > 5.0) return 0;
     webkit_web_view_set_zoom_level(webview->web_view, zoom);
     return 1;
+#endif
 }
 
 int native_sdk_gtk_set_webview_layer(native_sdk_gtk_host_t *host, uint64_t window_id, const char *label, size_t label_len, int layer) {
+#if !NATIVE_SDK_HAS_WEBKITGTK
+    (void)host;
+    (void)window_id;
+    (void)label;
+    (void)label_len;
+    (void)layer;
+    return 0;
+#else
     native_sdk_gtk_window_t *win = native_sdk_find_window(host, window_id);
     char *label_copy = label_len > 0 ? native_sdk_strndup(label, label_len) : NULL;
-    if (label_copy && strcmp(label_copy, "main") == 0 && win && win->web_view) {
+    if (label_copy && strcmp(label_copy, "main") == 0 && native_sdk_ensure_main_webview(win)) {
         free(label_copy);
         win->main_webview_layer = layer;
         native_sdk_reorder_overlays(win);
@@ -3703,8 +3905,11 @@ int native_sdk_gtk_set_webview_layer(native_sdk_gtk_host_t *host, uint64_t windo
     webview->layer = layer;
     native_sdk_reorder_overlays(win);
     return 1;
+#endif
 }
 
+/* No stub needed: a stub build can never create a webview, so the label
+ * scan below is honestly empty and every close answers 0. */
 int native_sdk_gtk_close_webview(native_sdk_gtk_host_t *host, uint64_t window_id, const char *label, size_t label_len) {
     native_sdk_gtk_window_t *win = native_sdk_find_window(host, window_id);
     char *label_copy = label_len > 0 ? native_sdk_strndup(label, label_len) : NULL;

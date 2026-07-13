@@ -25,6 +25,8 @@ export const navSections: NavSection[] = [
     title: "Core Concepts",
     items: [
       { name: "App Model", href: "/app-model" },
+      { name: "TypeScript Cores", href: "/typescript" },
+      { name: "Where Packages Go", href: "/typescript/packages" },
       { name: "Native UI", href: "/native-ui" },
       { name: "State & Data Flow", href: "/state" },
       { name: "Theming", href: "/theming" },
@@ -95,6 +97,7 @@ export const navSections: NavSection[] = [
       { name: "Platform Support", href: "/platform-support" },
       { name: "Debugging", href: "/debugging" },
       { name: "native doctor", href: "/debugging/doctor" },
+      { name: "Zig 0.16 Notes", href: "/zig" },
       { name: "Extensions", href: "/extensions" },
     ],
   },

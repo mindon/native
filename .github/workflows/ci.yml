@@ -18,6 +18,12 @@ jobs:
       - uses: mlugg/setup-zig@v2
         with:
           version: 0.16.0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      # The TypeScript core suites transpile at build/test time; without
+      # node they skip silently, so CI must provide it.
+      - run: npm ci --prefix packages/core
       - run: zig build test
       - run: zig build validate
 
@@ -81,6 +87,15 @@ jobs:
       - name: Install WebKitGTK dependencies
         run: sudo apt-get update && sudo apt-get install -y libgtk-4-dev libwebkitgtk-6.0-dev
       - run: zig build test-webview-system-link -Dplatform=linux
+      # Declare-to-use, proven on real Linux executables WITH the
+      # WebKitGTK dev package installed — the seam, not the environment:
+      # the native-only ui-inbox binary must carry no libwebkitgtk
+      # DT_NEEDED entry and no webkit_/jsc_ dynamic symbol even though
+      # the headers were right there, while the webview example must
+      # keep them. (The environment half — building native-only on a
+      # runner with no WebKitGTK dev package at all — is the
+      # linux-canvas-smoke job.)
+      - run: zig build test-linux-web-layer-audit
 
   windows-webview:
     name: Windows WebView
@@ -106,6 +121,12 @@ jobs:
       - uses: mlugg/setup-zig@v2
         with:
           version: 0.16.0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      # The TypeScript core suites transpile at build/test time; without
+      # node they skip silently, so CI must provide it.
+      - run: npm ci --prefix packages/core
       - run: zig build test-tooling
 
   npm-package:
@@ -127,9 +148,20 @@ jobs:
       - uses: mlugg/setup-zig@v2
         with:
           version: 0.16.0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      # The TypeScript examples transpile at build time; the transpiler
+      # needs its installed dependency.
+      - run: npm ci --prefix packages/core
       - name: Install GTK dependencies
         run: sudo apt-get update && sudo apt-get install -y libgtk-4-dev libwebkitgtk-6.0-dev
       - run: zig build test-examples-native
+      # Declare-to-use, proven on real Windows executables: the
+      # canvas-only ui-inbox cross-compiles without the embedded WebView
+      # layer (no WebView2Loader.dll reference, no loader installed) and
+      # the webview example keeps it.
+      - run: zig build test-windows-web-layer-audit
 
   linux-canvas-smoke:
     name: Linux Canvas Smoke
@@ -139,14 +171,22 @@ jobs:
       - uses: mlugg/setup-zig@v2
         with:
           version: 0.16.0
+      # Deliberately NO libwebkitgtk-6.0-dev: ui-inbox declares no web
+      # use, so its host compiles with the WebKitGTK stub seam and this
+      # job doubles as the native-only Linux LINK test — the build can
+      # only succeed if nothing in a native-only app needs the WebKitGTK
+      # headers or pkg-config entry. (The seam under webkit-PRESENT
+      # conditions is the linux-webkitgtk job's ELF cross-audit.)
       - name: Install GTK and Xvfb
-        run: sudo apt-get update && sudo apt-get install -y libgtk-4-dev libwebkitgtk-6.0-dev xvfb
-      # Drives the gpu_surface software path against system WebKitGTK under
-      # Xvfb: snapshot ready, gpu_backend=software, gpu_nonblank=true,
-      # automation widget-click, and a rendered screenshot. Sandbox/a11y
-      # env, the widened cold-start readiness budget (shared runners stall
-      # ~27 s before the first runtime event), and failure forensics (dump
-      # snapshot + app log) all live in the script.
+        run: sudo apt-get update && sudo apt-get install -y libgtk-4-dev xvfb
+      # Drives the gpu_surface software path under Xvfb: snapshot ready,
+      # gpu_backend=software, gpu_nonblank=true, automation widget-click,
+      # a rendered screenshot, an ELF audit that the built binary carries
+      # no WebKitGTK reference, and ZERO WebKit helper processes (canvas
+      # apps never boot WebKit). A11y env, the widened cold-start
+      # readiness budget (shared runners stall ~27 s before the first
+      # runtime event), and failure forensics (dump snapshot + app log)
+      # all live in the script.
       - name: Build and drive ui-inbox headless
         run: .github/scripts/linux-canvas-smoke.sh
 
@@ -218,6 +258,12 @@ jobs:
       - uses: mlugg/setup-zig@v2
         with:
           version: 0.16.0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      # The default scaffold is a TypeScript core: its build runs the
+      # @native-sdk/core transpiler from this checkout's own install.
+      - run: npm ci --prefix packages/core
       - run: zig build
       - name: Scaffold and test the zero-config native app
         run: |
@@ -228,8 +274,17 @@ jobs:
           # Slim scaffold: no build files — the CLI's generated graph drives it.
           test ! -f "$app/build.zig"
           test ! -f "$app/build.zig.zon"
+          # The editor surface landed: package.json + tsconfig.json + the
+          # materialized @native-sdk/core copy stock tsc resolves.
+          test -f "$app/package.json"
+          test -f "$app/tsconfig.json"
+          test -f "$app/node_modules/@native-sdk/core/sdk/core.ts"
+          # ...and none of it is build truth: every verb works without it.
+          rm -rf "$app/node_modules"
           ./zig-out/bin/native test "$app" -Dplatform=null
           ./zig-out/bin/native check "$app"
+          # check self-healed the editor copy back into place.
+          test -f "$app/node_modules/@native-sdk/core/sdk/core.ts"
           ./zig-out/bin/native eject "$app"
           (cd "$app" && zig build test -Dplatform=null)
       - name: Scaffold and test frontend templates

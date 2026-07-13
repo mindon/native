@@ -195,6 +195,15 @@ pub fn build(b: *std.Build) void {
     eject_components_mod.addImport("native_sdk", desktop_mod);
     const eject_components_tests = testArtifact(b, eject_components_mod);
 
+    // Transpiled-core end-to-end suite: tests/ts-core/fixture.ts is
+    // emitted by the repo's own transpiler AT BUILD TIME (never a
+    // committed Zig snapshot) and driven through the real runtime via
+    // `TsCoreHost`. Gated on node plus the transpiler package's
+    // installed dependency: absent either, the suite is skipped (the
+    // bridge itself stays covered by src/runtime/ts_core_host_tests.zig
+    // against a hand-written emitted-ABI core).
+    const ts_core_e2e_tests = tsCoreE2eArtifact(b, target, optimize, desktop_mod, tooling_mod);
+
     const ui_markup_mod = module(b, target, optimize, "src/primitives/canvas/ui_markup.zig");
     const markup_lsp_mod = module(b, target, optimize, "tools/native-sdk/markup_lsp.zig");
     markup_lsp_mod.addImport("ui_markup", ui_markup_mod);
@@ -204,6 +213,11 @@ pub fn build(b: *std.Build) void {
     automation_cli_mod.addImport("automation_protocol", automation_protocol_mod);
     automation_cli_mod.addImport("ui_markup", ui_markup_mod);
     const automation_cli_tests = testArtifact(b, automation_cli_mod);
+
+    const markup_cli_mod = module(b, target, optimize, "tools/native-sdk/markup.zig");
+    markup_cli_mod.addImport("ui_markup", ui_markup_mod);
+    markup_cli_mod.addImport("markup_lsp", markup_lsp_mod);
+    const markup_cli_tests = testArtifact(b, markup_cli_mod);
 
     // `native version` names the commit the binary was built from, so
     // binary/framework skew ("your native binary may be stale") is a
@@ -400,8 +414,30 @@ pub fn build(b: *std.Build) void {
     test_step.dependOn(&b.addRunArtifact(automation_protocol_tests).step);
     test_step.dependOn(&b.addRunArtifact(tooling_tests).step);
     test_step.dependOn(&b.addRunArtifact(eject_components_tests).step);
+    if (ts_core_e2e_tests) |ts_core_artifacts| {
+        const ts_core_e2e_step = b.step("test-ts-core-e2e", "Run the transpiled-core end-to-end suites (requires node)");
+        const host_e2e_run = b.addRunArtifact(ts_core_artifacts.host);
+        const soundboard_e2e_run = b.addRunArtifact(ts_core_artifacts.soundboard);
+        const monitor_e2e_run = b.addRunArtifact(ts_core_artifacts.system_monitor);
+        const scaffold_ide_e2e_run = b.addRunArtifact(ts_core_artifacts.scaffold_ide);
+        // The suite scaffolds and typechecks real trees under .zig-cache;
+        // no build inputs/outputs to hash, so always run it.
+        scaffold_ide_e2e_run.has_side_effects = true;
+        const ai_chat_e2e_run = b.addRunArtifact(ts_core_artifacts.ai_chat);
+        ts_core_e2e_step.dependOn(&host_e2e_run.step);
+        ts_core_e2e_step.dependOn(&soundboard_e2e_run.step);
+        ts_core_e2e_step.dependOn(&monitor_e2e_run.step);
+        ts_core_e2e_step.dependOn(&scaffold_ide_e2e_run.step);
+        ts_core_e2e_step.dependOn(&ai_chat_e2e_run.step);
+        test_step.dependOn(&host_e2e_run.step);
+        test_step.dependOn(&soundboard_e2e_run.step);
+        test_step.dependOn(&monitor_e2e_run.step);
+        test_step.dependOn(&scaffold_ide_e2e_run.step);
+        test_step.dependOn(&ai_chat_e2e_run.step);
+    }
     test_step.dependOn(&b.addRunArtifact(markup_lsp_tests).step);
     test_step.dependOn(&b.addRunArtifact(automation_cli_tests).step);
+    test_step.dependOn(&b.addRunArtifact(markup_cli_tests).step);
     addFileContainsCheckStep(b, file_contains_checker, test_step, "test-package-types", "Verify package TypeScript platform feature names", &.{
         .{ .path = "packages/native-sdk/native-sdk.d.ts", .pattern = "NativeSdkCommandInfo" },
         .{ .path = "packages/native-sdk/native-sdk.d.ts", .pattern = "list(): Promise<NativeSdkCommandInfo[]>" },
@@ -425,6 +461,12 @@ pub fn build(b: *std.Build) void {
         .{ .path = "packages/native-sdk/native-sdk.d.ts", .pattern = "\"gpu_surfaces\"" },
         .{ .path = "packages/native-sdk/native-sdk.d.ts", .pattern = "\"gpuSurfaces\"" },
         .{ .path = "packages/native-sdk/native-sdk.d.ts", .pattern = "gpuFirstFrameLatencyNs: number" },
+    });
+    addFileContainsCheckStep(b, file_contains_checker, test_step, "test-app-test-entry-analysis", "Verify the managed app test step force-analyzes the entry point (UiApp.create's Model-defaults rule must teach at `native test`, not ambush at `native build`)", &.{
+        .{ .path = "build/app.zig", .pattern = "app_analysis.zig" },
+        .{ .path = "build/app.zig", .pattern = "if (@hasDecl(app, \"main\")) _ = &app.main;" },
+        .{ .path = "build/app.zig", .pattern = "test_step.dependOn(&analysis_obj.step);" },
+        .{ .path = "src/runtime/ui_app.zig", .pattern = "has no default value - give every Model field a default" },
     });
     addFileContainsCheckStep(b, file_contains_checker, test_step, "test-bridge-view-selector-helpers", "Verify injected view helpers accept string selectors", &.{
         .{ .path = "src/platform/macos/appkit_host.m", .pattern = "viewSelectorPayload(options)" },
@@ -482,21 +524,46 @@ pub fn build(b: *std.Build) void {
         .{ .path = "src/platform/linux/gtk_host.c", .pattern = "change != NATIVE_SDK_GST_STATE_CHANGE_ASYNC" },
         .{ .path = "src/platform/linux/gtk_host.c", .pattern = "#define NATIVE_SDK_GST_STATE_CHANGE_ASYNC 2" },
     });
-    // The embedded-WebView layer must stay real: the vendored WebView2
-    // SDK header turns the guard on, every first-party build graph puts
-    // it on the include path, and a build that cannot see it fails at
-    // compile time instead of quietly shipping the stubbed host (whose
-    // WebView loads report WebViewNotFound at runtime).
-    addFileContainsCheckStep(b, file_contains_checker, test_step, "test-windows-webview2-vendor", "Verify the vendored WebView2 SDK stays wired into every Windows build graph", &.{
+    // The embedded-WebView layer must stay real AND declare-to-use: the
+    // standard build graph puts the vendored WebView2 SDK header on the
+    // include path exactly when app.zon declares web use (`if
+    // (web_layer)`), and only the native-only branch passes the stub
+    // define. In the guard the stub define is tested FIRST, before
+    // header visibility: on a machine where the WebView2 SDK headers are
+    // reachable through the system include paths, an
+    // include-path-decides guard would compile the full layer into a
+    // native-only build and reintroduce the WebView2Loader.dll reference
+    // its executable must not carry. Without the define the header is
+    // required — a web build that cannot see it fails at compile time
+    // instead of quietly shipping the stubbed host (whose WebView loads
+    // report WebViewNotFound at runtime).
+    addFileContainsCheckStep(b, file_contains_checker, test_step, "test-windows-webview2-vendor", "Verify the vendored WebView2 SDK stays wired into every web-declaring Windows build graph", &.{
         .{ .path = "third_party/webview2/include/WebView2.h", .pattern = "CreateCoreWebView2EnvironmentWithOptions" },
         .{ .path = "third_party/webview2/include/EventToken.h", .pattern = "EventRegistrationToken" },
         .{ .path = "third_party/webview2/LICENSE.txt", .pattern = "Redistribution and use in source and binary forms" },
+        .{ .path = "src/platform/windows/webview2_host.cpp", .pattern = "#if defined(NATIVE_SDK_ALLOW_WEBVIEW2_STUB)" },
+        .{ .path = "src/platform/windows/webview2_host.cpp", .pattern = "#elif __has_include(<WebView2.h>) && __has_include(<wrl.h>)" },
         .{ .path = "src/platform/windows/webview2_host.cpp", .pattern = "#error \"WebView2.h not found" },
         .{ .path = "src/platform/windows/webview2_host.cpp", .pattern = "LoadLibraryW(L\"WebView2Loader.dll\")" },
+        .{ .path = "build/app.zig", .pattern = ".system => if (web_layer) {" },
         .{ .path = "build/app.zig", .pattern = "app_mod.addIncludePath(dep.path(\"third_party/webview2/include\"));" },
         .{ .path = "build/app.zig", .pattern = "third_party/webview2/x64/WebView2Loader.dll" },
+        .{ .path = "build/app.zig", .pattern = "\"-DNATIVE_SDK_ALLOW_WEBVIEW2_STUB\"" },
         .{ .path = "src/tooling/templates.zig", .pattern = "third_party/webview2/include" },
         .{ .path = "src/tooling/templates.zig", .pattern = "third_party/webview2/x64/WebView2Loader.dll" },
+    });
+    // The Linux mirror of the Windows seam: the stub define wins over
+    // header visibility (a native-only build never reintroduces the
+    // libwebkitgtk link even where the dev package is installed), the
+    // header is required for web builds, and both build graphs compile
+    // gtk_host.c with the stub and drop the webkitgtk-6.0 link when the
+    // web layer is excluded.
+    addFileContainsCheckStep(b, file_contains_checker, test_step, "test-linux-webkitgtk-seam", "Verify the WebKitGTK compile seam stays wired through the GTK host and both Linux build graphs", &.{
+        .{ .path = "src/platform/linux/gtk_host.c", .pattern = "#if defined(NATIVE_SDK_ALLOW_WEBKITGTK_STUB)" },
+        .{ .path = "src/platform/linux/gtk_host.c", .pattern = "#elif __has_include(<webkit/webkit.h>)" },
+        .{ .path = "src/platform/linux/gtk_host.c", .pattern = "#error \"webkit/webkit.h not found" },
+        .{ .path = "build/app.zig", .pattern = "\"-DNATIVE_SDK_ALLOW_WEBKITGTK_STUB\"" },
+        .{ .path = "src/tooling/templates.zig", .pattern = "\"-DNATIVE_SDK_ALLOW_WEBKITGTK_STUB\"" },
     });
     addLayoutCheckStep(b, test_step, "test-windows-webview2-loader-layout", "Verify the vendored WebView2 loader binaries are present", &.{
         "third_party/webview2/x64/WebView2Loader.dll",
@@ -768,6 +835,7 @@ pub fn build(b: *std.Build) void {
     }
     addTestStep(b, "test-automation-protocol", "Run automation protocol tests", automation_protocol_tests);
     addTestStep(b, "test-automation-cli", "Run native automate CLI tests", automation_cli_tests);
+    addTestStep(b, "test-markup-cli", "Run native markup CLI tests", markup_cli_tests);
     addTestStep(b, "test-tooling", "Run Native SDK tooling tests", tooling_tests);
     addTestStep(b, "test-eject-components", "Run ejected-component widget-identity tests", eject_components_tests);
 
@@ -797,6 +865,75 @@ pub fn build(b: *std.Build) void {
     const browser_system_link_step = b.step("test-browser-system-link", "Build the browser example with the system engine");
     browser_system_link_step.dependOn(&build_browser_system.step);
 
+    // Windows web-layer PE cross-audit: the declare-to-use inference,
+    // proven on real executables from any host via cross-compile.
+    // ui-inbox's manifest declares no web use, so its exe must carry no
+    // WebView2Loader.dll reference (the whole embedded layer compiles
+    // out) and no loader may land beside it; the webview example declares
+    // the "webview" capability, so its exe must keep the reference. The
+    // loader string lives as UTF-16 in the host, so the audit is a
+    // dedicated scanner (tools/audit_web_layer.zig), not a text grep.
+    const web_layer_auditor = b.addExecutable(.{
+        .name = "audit-web-layer",
+        .root_module = module(b, host_target, optimize, "tools/audit_web_layer.zig"),
+    });
+    // A loader installed by a build predating the inference would fail
+    // the absence check below without being this build's fault; clear it
+    // so the assertion tests what THIS build installs.
+    const clean_native_only_loader = b.addSystemCommand(&.{ "sh", "-c", "rm -f examples/ui-inbox/zig-out/bin/WebView2Loader.dll" });
+    const build_native_only_windows = b.addSystemCommand(&.{ "zig", "build", "-Dtarget=x86_64-windows-gnu", "-Dplatform=windows" });
+    build_native_only_windows.setCwd(b.path("examples/ui-inbox"));
+    build_native_only_windows.step.dependOn(&clean_native_only_loader.step);
+    const build_webview_windows = b.addSystemCommand(&.{ "zig", "build", "-Dtarget=x86_64-windows-gnu", "-Dplatform=windows", "-Dweb-engine=system" });
+    build_webview_windows.setCwd(b.path("examples/webview"));
+    const audit_native_only_exe = b.addRunArtifact(web_layer_auditor);
+    audit_native_only_exe.addArgs(&.{ "examples/ui-inbox/zig-out/bin/ui-inbox.exe", "absent" });
+    audit_native_only_exe.has_side_effects = true;
+    audit_native_only_exe.step.dependOn(&build_native_only_windows.step);
+    const audit_webview_exe = b.addRunArtifact(web_layer_auditor);
+    audit_webview_exe.addArgs(&.{ "examples/webview/zig-out/bin/webview.exe", "present" });
+    audit_webview_exe.has_side_effects = true;
+    audit_webview_exe.step.dependOn(&build_webview_windows.step);
+    const audit_native_only_loader = b.addSystemCommand(&.{
+        "sh", "-c",
+        \\test ! -f examples/ui-inbox/zig-out/bin/WebView2Loader.dll || {
+        \\  echo "web-layer audit FAILED: the native-only build installed WebView2Loader.dll" >&2
+        \\  exit 1
+        \\}
+    });
+    audit_native_only_loader.step.dependOn(&build_native_only_windows.step);
+    const web_layer_audit_step = b.step("test-windows-web-layer-audit", "Cross-compile a native-only and a web example for Windows and audit the web layer in each exe");
+    web_layer_audit_step.dependOn(&audit_native_only_exe.step);
+    web_layer_audit_step.dependOn(&audit_webview_exe.step);
+    web_layer_audit_step.dependOn(&audit_native_only_loader.step);
+
+    // Linux web-layer ELF cross-audit: the same declare-to-use proof on
+    // real Linux executables. Unlike the Windows step this cannot
+    // cross-compile from any host — the GTK host needs the system GTK4
+    // (and, for the web example, WebKitGTK) development headers — so the
+    // step runs on Linux with both packages installed and proves the
+    // SEAM, not the environment: the native-only exe must carry no
+    // libwebkitgtk DT_NEEDED entry and no webkit_/jsc_ dynamic symbol
+    // even though the dev package was right there, while the web example
+    // must keep them. The environment half (a native-only app building
+    // on a runner with no WebKitGTK dev package at all) is proven by the
+    // linux-canvas-smoke CI job.
+    const build_native_only_linux = b.addSystemCommand(&.{ "zig", "build", "-Dplatform=linux" });
+    build_native_only_linux.setCwd(b.path("examples/ui-inbox"));
+    const build_webview_linux = b.addSystemCommand(&.{ "zig", "build", "-Dplatform=linux", "-Dweb-engine=system" });
+    build_webview_linux.setCwd(b.path("examples/webview"));
+    const audit_native_only_elf = b.addRunArtifact(web_layer_auditor);
+    audit_native_only_elf.addArgs(&.{ "examples/ui-inbox/zig-out/bin/ui-inbox", "absent" });
+    audit_native_only_elf.has_side_effects = true;
+    audit_native_only_elf.step.dependOn(&build_native_only_linux.step);
+    const audit_webview_elf = b.addRunArtifact(web_layer_auditor);
+    audit_webview_elf.addArgs(&.{ "examples/webview/zig-out/bin/webview", "present" });
+    audit_webview_elf.has_side_effects = true;
+    audit_webview_elf.step.dependOn(&build_webview_linux.step);
+    const linux_web_layer_audit_step = b.step("test-linux-web-layer-audit", "Build a native-only and a web example for Linux (Linux host with GTK4 + WebKitGTK dev packages) and audit the web layer in each ELF");
+    linux_web_layer_audit_step.dependOn(&audit_native_only_elf.step);
+    linux_web_layer_audit_step.dependOn(&audit_webview_elf.step);
+
     const frontend_examples_step = b.step("test-examples-frontends", "Run frontend example tests");
     addExampleTestStep(b, host_cli_exe, frontend_examples_step, "test-example-next", "Run Next example tests", "examples/next", .owned);
     addExampleTestStep(b, host_cli_exe, frontend_examples_step, "test-example-react", "Run React example tests", "examples/react", .owned);
@@ -820,12 +957,14 @@ pub fn build(b: *std.Build) void {
     addExampleTestStep(b, host_cli_exe, native_examples_step, "test-example-kanban", "Run ui builder kanban example tests", "examples/kanban", .managed);
     addExampleTestStep(b, host_cli_exe, native_examples_step, "test-example-habits", "Run markup habits example tests", "examples/habits", .managed);
     addExampleTestStep(b, host_cli_exe, native_examples_step, "test-example-soundboard", "Run soundboard example tests", "examples/soundboard", .managed);
+    addExampleTestStep(b, host_cli_exe, native_examples_step, "test-example-soundboard-ts", "Run soundboard-ts example tests", "examples/soundboard-ts", .managed);
     addExampleTestStep(b, host_cli_exe, native_examples_step, "test-example-deck", "Run deck example tests", "examples/deck", .managed);
     addExampleTestStep(b, host_cli_exe, native_examples_step, "test-example-markdown-viewer", "Run markdown viewer example tests", "examples/markdown-viewer", .managed);
     addExampleTestStep(b, host_cli_exe, native_examples_step, "test-example-calculator", "Run calculator example tests", "examples/calculator", .managed);
     addExampleTestStep(b, host_cli_exe, native_examples_step, "test-example-notes", "Run notes example tests", "examples/notes", .managed);
     addExampleTestStep(b, host_cli_exe, native_examples_step, "test-example-split-collapse", "Run split collapse example tests", "examples/split-collapse", .managed);
     addExampleTestStep(b, host_cli_exe, native_examples_step, "test-example-system-monitor", "Run system monitor example tests", "examples/system-monitor", .managed);
+    addExampleTestStep(b, host_cli_exe, native_examples_step, "test-example-system-monitor-ts", "Run system-monitor-ts example tests", "examples/system-monitor-ts", .managed);
     addExampleTestStep(b, host_cli_exe, native_examples_step, "test-example-effects-probe", "Run effects probe example tests", "examples/effects-probe", .managed);
     addExampleTestStep(b, host_cli_exe, native_examples_step, "test-example-feed", "Run feed example tests", "examples/feed", .managed);
     addExampleTestStep(b, host_cli_exe, native_examples_step, "test-example-canvas-preview", "Run canvas preview example tests", "examples/canvas-preview", .managed);
@@ -1406,6 +1545,16 @@ pub fn build(b: *std.Build) void {
         \\ready_budget_ms="$smoke_budget_ms"
         \\if [ "$ready_budget_ms" -lt 500 ]; then ready_budget_ms=500; fi
         \\ready_budget_ns=$((ready_budget_ms * 1000000))
+        \\# gpu-dashboard is a native-only app (nothing in app.zon declares web
+        \\# use), so its macOS host must never boot the WebKit stack: WKWebView
+        \\# instantiation spawns com.apple.WebKit.* XPC helpers. They are
+        \\# launchd-parented (not app children), so the honest cheap probe is
+        \\# the machine-wide helper set before launch vs at the end of the
+        \\# session — a NEW helper during this headless smoke window means the
+        \\# lazy main-WebView path regressed (the failure lists the processes
+        \\# so a coincidental web app launched mid-smoke is tellable apart).
+        \\webkit_helpers() { pgrep -f 'com\.apple\.WebKit\.(WebContent|Networking|GPU)' 2>/dev/null | tr '\n' ' '; }
+        \\webkit_before="$(webkit_helpers)"
         \\pid=""
         \\trap 'status=$?; kill "$pid" >/dev/null 2>&1 || true; wait "$pid" >/dev/null 2>&1 || true; if [ "$status" -ne 0 ]; then echo "---- app log (.zig-cache/native-sdk-gpu-dashboard-smoke.log) ----" >&2; cat .zig-cache/native-sdk-gpu-dashboard-smoke.log >&2 2>/dev/null || true; fi' EXIT
         \\stop_app() {
@@ -1572,6 +1721,19 @@ pub fn build(b: *std.Build) void {
         \\if ! grep -q "gpu incremental verify view=dashboard-canvas checks=" "$verify_log" 2>/dev/null; then echo "dashboard verify mode recorded no incremental checks" >&2; exit 1; fi
         \\if grep -q "verify MISMATCH" "$verify_log" 2>/dev/null; then echo "dashboard incremental present diverged from a full redraw:" >&2; grep "verify MISMATCH" "$verify_log" >&2; exit 1; fi
         \\if grep "gpu incremental verify view=dashboard-canvas checks=" "$verify_log" | grep -qv "mismatches=0"; then echo "dashboard incremental verify reported mismatches" >&2; exit 1; fi
+        \\# The whole session ran (two launches, clicks, resizes): a native-only
+        \\# macOS app must have spawned ZERO new WebKit helper processes.
+        \\webkit_after="$(webkit_helpers)"
+        \\new_webkit=""
+        \\for helper_pid in $webkit_after; do
+        \\  case " $webkit_before " in *" $helper_pid "*) ;; *) new_webkit="$new_webkit $helper_pid" ;; esac
+        \\done
+        \\if [ -n "$new_webkit" ]; then
+        \\  echo "native-only gpu-dashboard session spawned WebKit helper processes:$new_webkit" >&2
+        \\  for helper_pid in $new_webkit; do ps -p "$helper_pid" -o pid,ppid,command >&2 || true; done
+        \\  exit 1
+        \\fi
+        \\echo "zero new WebKit helper processes during the native-only session"
         \\echo "gpu-dashboard smoke ok"
         ,
         "sh",
@@ -2162,10 +2324,15 @@ pub fn build(b: *std.Build) void {
     // carries the CLI as its executable (packaging only needs a real
     // Mach-O to sign); the check skips loudly on hosts without codesign
     // (any non-macOS machine) instead of pretending to have verified.
+    // Signing that claims to sign now fails the package on hosts that
+    // cannot run codesign (that IS the fix this step gates), so only a
+    // macOS host requests adhoc here; elsewhere the package stays
+    // unsigned and the check script below skips loudly as before.
+    const package_signing_mode: []const u8 = if (b.graph.host.result.os.tag == .macos) "adhoc" else "none";
     const package_signing_run = b.addRunArtifact(host_cli_exe);
     package_signing_run.addArgs(&.{ "package", "--target", "macos", "--output", "zig-out/package/native-sdk-signing-verify.app", "--binary" });
     package_signing_run.addFileArg(host_cli_exe.getEmittedBin());
-    package_signing_run.addArgs(&.{ "--manifest", "app.zon", "--assets", "assets", "--optimize", optimize_name, "--signing", "adhoc" });
+    package_signing_run.addArgs(&.{ "--manifest", "app.zon", "--assets", "assets", "--optimize", optimize_name, "--signing", package_signing_mode });
     package_signing_run.has_side_effects = true;
     const package_signing_check = b.addSystemCommand(&.{
         "sh", "-c",
@@ -2311,6 +2478,168 @@ fn cliBuildCommit(b: *std.Build) []const u8 {
 
 fn testArtifact(b: *std.Build, mod: *std.Build.Module) *std.Build.Step.Compile {
     return filteredTestArtifact(b, mod, "test", &.{});
+}
+
+/// The two transpiled-core end-to-end test binaries: the host/markup
+/// fixture suite (tests/ts-core) and the soundboard-ts example suite —
+/// the launch-gate port driven as a REAL app (its committed core, its
+/// shipping markup). Each runs the @native-sdk/core transpiler (node)
+/// over the TS core at build time, pairs the emitted core with its rt
+/// kernel in one generated module, and compiles the Zig test root
+/// against it plus the framework. Returns null — the suites are
+/// skipped, not failed — when node or the transpiler package's
+/// installed dependency (`npm ci` in packages/core) is missing.
+const TsCoreE2eArtifacts = struct {
+    host: *std.Build.Step.Compile,
+    soundboard: *std.Build.Step.Compile,
+    system_monitor: *std.Build.Step.Compile,
+    /// The stock-IDE contract: a fresh scaffold (and the committed TS
+    /// example ports) typecheck under the REAL tsc with zero injected
+    /// paths, and builds keep working with node_modules deleted.
+    scaffold_ide: *std.Build.Step.Compile,
+    ai_chat: *std.Build.Step.Compile,
+};
+
+fn tsCoreE2eArtifact(
+    b: *std.Build,
+    target: std.Build.ResolvedTarget,
+    optimize: std.builtin.OptimizeMode,
+    desktop_mod: *std.Build.Module,
+    tooling_mod: *std.Build.Module,
+) ?TsCoreE2eArtifacts {
+    const node = b.findProgram(&.{"node"}, &.{}) catch return null;
+    b.build_root.handle.access(
+        b.graph.io,
+        "packages/core/node_modules/@typescript/typescript6",
+        .{},
+    ) catch return null;
+
+    // Each fixture stages its own copy of rt.zig, so each emitted core
+    // owns a distinct rt kernel instance — the process contract the
+    // coexistence e2e test pins (two live cores, no shared arenas).
+    const fixture_mod = tsCoreFixtureModule(b, target, optimize, node, "tests/ts-core/fixture.ts");
+    const markup_fixture_mod = tsCoreFixtureModule(b, target, optimize, node, "tests/ts-core/markup_fixture.ts");
+
+    const e2e_mod = module(b, target, optimize, "tests/ts-core/host_e2e_tests.zig");
+    e2e_mod.addImport("native_sdk", desktop_mod);
+    e2e_mod.addImport("ts_core_fixture", fixture_mod);
+    e2e_mod.addImport("ts_markup_fixture", markup_fixture_mod);
+
+    // The soundboard-ts example's core and markup, tested as one app:
+    // the test root stages beside a copy of the example's app.native so
+    // the compiled markup engine builds the SHIPPING view over the
+    // emitted model.
+    const soundboard_core_mod = tsCoreFixtureModule(b, target, optimize, node, "examples/soundboard-ts/src/core.ts");
+    const soundboard_stage = b.addWriteFiles();
+    const soundboard_root = soundboard_stage.addCopyFile(b.path("tests/ts-core/soundboard_e2e_tests.zig"), "soundboard_e2e_tests.zig");
+    _ = soundboard_stage.addCopyFile(b.path("examples/soundboard-ts/src/app.native"), "app.native");
+    const soundboard_mod = b.createModule(.{
+        .root_source_file = soundboard_root,
+        .target = target,
+        .optimize = optimize,
+    });
+    soundboard_mod.addImport("native_sdk", desktop_mod);
+    soundboard_mod.addImport("ts_soundboard_core", soundboard_core_mod);
+
+    // The system-monitor-ts example's core and markup, tested the same
+    // way — plus the ORIGINAL Zig example's committed sampler captures,
+    // staged as fixtures so both ports parse the same recorded truth.
+    const monitor_core_mod = tsCoreFixtureModule(b, target, optimize, node, "examples/system-monitor-ts/src/core.ts");
+    const monitor_stage = b.addWriteFiles();
+    const monitor_root = monitor_stage.addCopyFile(b.path("tests/ts-core/system_monitor_e2e_tests.zig"), "system_monitor_e2e_tests.zig");
+    _ = monitor_stage.addCopyFile(b.path("examples/system-monitor-ts/src/app.native"), "app.native");
+    _ = monitor_stage.addCopyFile(b.path("examples/system-monitor/src/fixtures/sysctl.txt"), "fixtures/sysctl.txt");
+    _ = monitor_stage.addCopyFile(b.path("examples/system-monitor/src/fixtures/ps.txt"), "fixtures/ps.txt");
+    _ = monitor_stage.addCopyFile(b.path("examples/system-monitor/src/fixtures/vm_stat.txt"), "fixtures/vm_stat.txt");
+    _ = monitor_stage.addCopyFile(b.path("examples/system-monitor/src/fixtures/ps-edge.txt"), "fixtures/ps-edge.txt");
+    const monitor_mod = b.createModule(.{
+        .root_source_file = monitor_root,
+        .target = target,
+        .optimize = optimize,
+    });
+    monitor_mod.addImport("native_sdk", desktop_mod);
+    monitor_mod.addImport("ts_system_monitor_core", monitor_core_mod);
+
+    // The stock-IDE suite runs the CLI's scaffold + editor-package plumbing
+    // (the tooling module) and shells out to node for the real tsc.
+    const scaffold_ide_mod = module(b, target, optimize, "tests/ts-core/scaffold_ide_e2e_tests.zig");
+    scaffold_ide_mod.addImport("tooling", tooling_mod);
+
+    // The ai-chat-ts example's core and markup, tested the same way:
+    // the chat client for an OpenAI-compatible endpoint, driven through
+    // the fake fetch feed (no network) with its shipping markup.
+    const ai_chat_core_mod = tsCoreFixtureModule(b, target, optimize, node, "examples/ai-chat-ts/src/core.ts");
+    const ai_chat_stage = b.addWriteFiles();
+    const ai_chat_root = ai_chat_stage.addCopyFile(b.path("tests/ts-core/ai_chat_e2e_tests.zig"), "ai_chat_e2e_tests.zig");
+    _ = ai_chat_stage.addCopyFile(b.path("examples/ai-chat-ts/src/app.native"), "app.native");
+    const ai_chat_mod = b.createModule(.{
+        .root_source_file = ai_chat_root,
+        .target = target,
+        .optimize = optimize,
+    });
+    ai_chat_mod.addImport("native_sdk", desktop_mod);
+    ai_chat_mod.addImport("ts_ai_chat_core", ai_chat_core_mod);
+
+    return .{
+        .host = filteredTestArtifact(b, e2e_mod, "ts-core-e2e-tests", &.{}),
+        .soundboard = filteredTestArtifact(b, soundboard_mod, "ts-soundboard-e2e-tests", &.{}),
+        .system_monitor = filteredTestArtifact(b, monitor_mod, "ts-system-monitor-e2e-tests", &.{}),
+        .scaffold_ide = filteredTestArtifact(b, scaffold_ide_mod, "ts-scaffold-ide-e2e-tests", &.{}),
+        .ai_chat = filteredTestArtifact(b, ai_chat_mod, "ts-ai-chat-e2e-tests", &.{}),
+    };
+}
+
+/// Transpile one TS fixture core at build time and pair the emitted
+/// Zig with its rt kernel in one generated module.
+fn tsCoreFixtureModule(
+    b: *std.Build,
+    target: std.Build.ResolvedTarget,
+    optimize: std.builtin.OptimizeMode,
+    node: []const u8,
+    fixture_path: []const u8,
+) *std.Build.Module {
+    const transpile = b.addSystemCommand(&.{node});
+    transpile.addFileArg(b.path("packages/core/src/cli.ts"));
+    transpile.addFileArg(b.path(fixture_path));
+    transpile.addArg("-o");
+    const emitted_core = transpile.addOutputFileArg("core.zig");
+    // The transpiler reads its own sources, the SDK modules, and the
+    // core's WHOLE import graph at run time; declare them all so edits
+    // re-emit the fixture. The graph is declared as every sibling .ts of
+    // the entry (a superset of the reachable imports: over-approximation
+    // only re-runs the transpile, never misses a stale input).
+    tsCoreAddDirInputs(b, transpile, "packages/core/sdk");
+    tsCoreAddDirInputs(b, transpile, std.fs.path.dirname(fixture_path) orelse ".");
+    const transpiler_sources = [_][]const u8{
+        "checker.ts", "cli.ts", "diagnostics.ts", "emitter.ts", "infer.ts", "modules.ts", "transpile.ts", "typed_ast.ts", "types.ts",
+    };
+    for (transpiler_sources) |source| {
+        transpile.addFileInput(b.path(b.fmt("packages/core/src/{s}", .{source})));
+    }
+
+    // The emitted core imports "rt.zig" relatively: stage both files
+    // into one generated directory to root the fixture module there.
+    const staged = b.addWriteFiles();
+    const core_root = staged.addCopyFile(emitted_core, "core.zig");
+    _ = staged.addCopyFile(b.path("packages/core/rt/rt.zig"), "rt.zig");
+    return b.createModule(.{
+        .root_source_file = core_root,
+        .target = target,
+        .optimize = optimize,
+    });
+}
+
+/// Declare every .ts file in `dir_path` (relative to the build root) as a
+/// file input of the transpile step — the multi-file staleness set.
+fn tsCoreAddDirInputs(b: *std.Build, transpile: *std.Build.Step.Run, dir_path: []const u8) void {
+    var dir = b.build_root.handle.openDir(b.graph.io, dir_path, .{ .iterate = true }) catch return;
+    defer dir.close(b.graph.io);
+    var it = dir.iterate();
+    while (it.next(b.graph.io) catch null) |entry| {
+        if (entry.kind != .file) continue;
+        if (!std.mem.endsWith(u8, entry.name, ".ts")) continue;
+        transpile.addFileInput(b.path(b.fmt("{s}/{s}", .{ dir_path, entry.name })));
+    }
 }
 
 fn filteredTestArtifact(b: *std.Build, mod: *std.Build.Module, name: []const u8, filters: []const []const u8) *std.Build.Step.Compile {
