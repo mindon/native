@@ -1,4 +1,5 @@
 const support = @import("test_support.zig");
+const widget_metrics = @import("widget_metrics.zig");
 const std = support.std;
 const geometry = support.geometry;
 const canvas = support.canvas;
@@ -3116,10 +3117,11 @@ test "themed design tokens flow into widget display lists" {
 }
 
 test "widget text at intrinsic width does not wrap under geometry pixel snapping" {
-    // Geometry snapping can shave up to half a device pixel off the frame
-    // that intrinsic sizing measured; the text emitter hands the shaved
-    // quantum back to the wrap budget so an exact-fit label ("Sort")
-    // never breaks into "Sor"/"t". Regression for the snapped-frame wrap
+    // Geometry snapping can shave up to a full device pixel off the frame
+    // that intrinsic sizing measured (each edge rounds independently by
+    // up to half); the text emitter hands the snap quantum back to the
+    // wrap budget so an exact-fit label ("Sort") never breaks into
+    // "Sor"/"t". Regression for the snapped-frame wrap
     // seam surfaced when the estimator became the bundled face's real
     // advance table.
     const scales = [_]f32{ 1, 2 };
@@ -3153,7 +3155,7 @@ test "widget text at intrinsic width does not wrap under geometry pixel snapping
 test "label-exact controls at intrinsic width never elide under geometry pixel snapping" {
     // The elision twin of the wrap seam above: a control sized exactly
     // to its measured label sits at a fractional width, and render-time
-    // geometry snapping can shave up to half a device pixel off that
+    // geometry snapping can shave up to a full device pixel off that
     // frame — past the elision slack, so real glyphs swap for an
     // ellipsis (system monitor's "PID" sort chip painting "PI…").
     // Intrinsic measured-label widths now ceil to the snap grid
@@ -3200,6 +3202,308 @@ test "label-exact controls at intrinsic width never elide under geometry pixel s
             try std.testing.expect(seen);
         };
     }
+}
+
+test "a string never elides inside its own measured width under edge snapping" {
+    // The measurement/ellipsize epsilon policy (see `textWrapMaxWidth`):
+    // geometry snapping rounds each frame edge independently, so a frame
+    // sized exactly to its measured text and sitting at a fractional
+    // position can come back up to a FULL device pixel narrower — the
+    // budget hands that whole quantum back, and the elision slack covers
+    // the residual float dust. Sweep fractional origins across the snap
+    // cell for every digit (the TS scaffold's counter, which painted "…"
+    // instead of "2" on Windows at scale 1) plus longer labels, at every
+    // real scale factor.
+    const scales = [_]f32{ 1, 1.25, 1.5, 2 };
+    const labels = [_][]const u8{ "0", "1", "2", "3", "4", "5", "6", "7", "8", "9", "ticks 7", "Sampling 60 s cadence" };
+    const size: f32 = 14;
+    for (scales) |scale| {
+        const tokens = DesignTokens{ .pixel_snap = .{ .geometry = true, .text = true, .scale = scale } };
+        for (labels) |label| {
+            const measured = canvas.estimateTextWidthForFont(default_sans_font_id, label, size);
+            var step: usize = 0;
+            while (step < 32) : (step += 1) {
+                const origin = 235 + @as(f32, @floatFromInt(step)) / 32.0;
+                // Snap both edges exactly like the renderer's
+                // `pixelSnapGeometryRect` does.
+                const left = @round(origin * scale) / scale;
+                const right = @round((origin + measured) * scale) / scale;
+                const snapped_width = @max(0, right - left);
+                var lines: [2]TextLine = undefined;
+                const layout = try canvas.layoutTextRun(.{
+                    .id = 1,
+                    .font_id = default_sans_font_id,
+                    .size = size,
+                    .origin = geometry.PointF.init(left, 20),
+                    .color = Color.rgb8(0, 0, 0),
+                    .text = label,
+                }, .{
+                    .max_width = widget_metrics.textWrapMaxWidth(tokens, snapped_width),
+                    .wrap = .none,
+                    .overflow = .ellipsis,
+                }, &lines);
+                try std.testing.expectEqual(@as(usize, 1), layout.lineCount());
+                for (layout.lines) |line| try std.testing.expect(!line.isElided());
+            }
+        }
+    }
+}
+
+test "hug-sized centered text leaf never elides under geometry pixel snapping" {
+    // The widget-level twin of the sweep above, in the exact scaffold
+    // shape that surfaced it: `<row main="center">` centers a hug-sized
+    // digit between two buttons, landing BOTH its frame edges on
+    // fractional thirds — the left edge snaps up, the right edge snaps
+    // down, and the frame loses more than the old half-pixel hand-back.
+    const digits = [_][]const u8{ "0", "1", "2", "3", "4", "5", "6", "7", "8", "9" };
+    const scales = [_]f32{ 1, 1.25, 1.5, 2 };
+    for (scales) |scale| {
+        const tokens = DesignTokens{ .pixel_snap = .{ .geometry = true, .text = true, .scale = scale } };
+        for (digits) |digit| {
+            const minus = Widget{ .id = 2, .kind = .button, .text = "-" };
+            const count = Widget{ .id = 3, .kind = .text, .text = digit };
+            const plus = Widget{ .id = 4, .kind = .button, .text = "+" };
+            const children = [_]Widget{ minus, count, plus };
+            const row = Widget{ .id = 1, .kind = .row, .layout = .{
+                .gap = 8,
+                .main_alignment = .center,
+                .cross_alignment = .center,
+            }, .children = &children };
+
+            var nodes: [4]WidgetLayoutNode = undefined;
+            const layout = try canvas.layoutWidgetTreeWithTokens(row, geometry.RectF.init(16, 56, 448, 164), tokens, &nodes);
+
+            var commands: [16]CanvasCommand = undefined;
+            var builder = Builder.init(&commands);
+            try canvas.emitWidgetLayout(&builder, layout, tokens);
+            var seen = false;
+            for (builder.displayList().commands) |command| switch (command) {
+                .draw_text => |text| {
+                    if (!std.mem.eql(u8, text.text, digit)) continue;
+                    seen = true;
+                    var lines: [2]TextLine = undefined;
+                    const text_layout = try canvas.layoutTextRun(text, text.text_layout.?, &lines);
+                    for (text_layout.lines) |line| try std.testing.expect(!line.isElided());
+                },
+                else => {},
+            };
+            try std.testing.expect(seen);
+        }
+    }
+}
+
+test "window-control clearance trims drag-header content on the cluster's side" {
+    // The engine half of the hidden-titlebar caption fix: when the
+    // runtime stamps the OS window-control cluster into the tokens, a
+    // `window_drag` row lays its content out clear of it — trailing
+    // cluster (Windows caption buttons) trims the content box's end,
+    // leading cluster (macOS traffic lights) its start. Non-drag rows
+    // never move.
+    const spacer = Widget{ .id = 2, .kind = .stack, .layout = .{ .grow = 1 } };
+    const status = Widget{ .id = 3, .kind = .text, .text = "sampling" };
+    const children = [_]Widget{ spacer, status };
+    var row = Widget{ .id = 1, .kind = .row, .layout = .{ .cross_alignment = .center }, .children = &children };
+    row.window_drag = true;
+    const bounds = geometry.RectF.init(0, 0, 400, 40);
+
+    // Trailing cluster: content ends at its leading edge.
+    const trailing_tokens = DesignTokens{ .window_controls = geometry.RectF.init(262, 0, 138, 32) };
+    var nodes: [4]WidgetLayoutNode = undefined;
+    var layout = try canvas.layoutWidgetTreeWithTokens(row, bounds, trailing_tokens, &nodes);
+    try std.testing.expect(layout.findById(3).?.frame.maxX() <= 262 + 0.01);
+
+    // Leading cluster (the macOS mirror): content starts past it.
+    const leading_tokens = DesignTokens{ .window_controls = geometry.RectF.init(0, 0, 78, 32) };
+    const lead_children = [_]Widget{ status, spacer };
+    var lead_row = row;
+    lead_row.children = &lead_children;
+    layout = try canvas.layoutWidgetTreeWithTokens(lead_row, bounds, leading_tokens, &nodes);
+    try std.testing.expect(layout.findById(3).?.frame.x >= 78 - 0.01);
+
+    // Unstamped tokens: byte-identical to a plain row.
+    layout = try canvas.layoutWidgetTreeWithTokens(row, bounds, DesignTokens{}, &nodes);
+    try std.testing.expectEqual(@as(f32, 400), layout.findById(3).?.frame.maxX());
+
+    // A non-drag row ignores the stamp entirely.
+    var plain = row;
+    plain.window_drag = false;
+    layout = try canvas.layoutWidgetTreeWithTokens(plain, bounds, trailing_tokens, &nodes);
+    try std.testing.expectEqual(@as(f32, 400), layout.findById(3).?.frame.maxX());
+}
+
+test "window-control collision scan flags readable content only" {
+    // The reservation trigger: text under the cluster inside a drag
+    // header counts; the row itself (its background paints under the
+    // buttons like it does under traffic lights), spacers, and
+    // full-bleed separators never do — and content outside any drag
+    // region is not the header's to fix.
+    const cluster = geometry.RectF.init(262, 0, 138, 32);
+    const bounds = geometry.RectF.init(0, 0, 400, 40);
+
+    const spacer = Widget{ .id = 2, .kind = .stack, .layout = .{ .grow = 1 } };
+    const status = Widget{ .id = 3, .kind = .text, .text = "sampling" };
+    const colliding_children = [_]Widget{ spacer, status };
+    var drag_row = Widget{ .id = 1, .kind = .row, .children = &colliding_children };
+    drag_row.window_drag = true;
+
+    var nodes: [6]WidgetLayoutNode = undefined;
+    var layout = try canvas.layoutWidgetTreeWithTokens(drag_row, bounds, DesignTokens{}, &nodes);
+    try std.testing.expect(canvas.windowDragContentUnderWindowControls(layout.nodes, cluster, DesignTokens{}));
+
+    // The same content already clear of the cluster: no trigger.
+    try std.testing.expect(!canvas.windowDragContentUnderWindowControls(layout.nodes, geometry.RectF.init(262, 200, 138, 32), DesignTokens{}));
+
+    // Decoration under the cluster: a full-width separator never
+    // triggers (it is expected to run under the band).
+    const separator = Widget{ .id = 4, .kind = .separator };
+    const decor_children = [_]Widget{ spacer, separator };
+    var decor_row = drag_row;
+    decor_row.children = &decor_children;
+    layout = try canvas.layoutWidgetTreeWithTokens(decor_row, bounds, DesignTokens{}, &nodes);
+    try std.testing.expect(!canvas.windowDragContentUnderWindowControls(layout.nodes, cluster, DesignTokens{}));
+
+    // Content under the cluster OUTSIDE any drag region: not the
+    // header's collision to fix, so no trigger.
+    var plain_row = drag_row;
+    plain_row.window_drag = false;
+    layout = try canvas.layoutWidgetTreeWithTokens(plain_row, bounds, DesignTokens{}, &nodes);
+    try std.testing.expect(!canvas.windowDragContentUnderWindowControls(layout.nodes, cluster, DesignTokens{}));
+}
+
+test "window-control collision scan judges text by its aligned painted bounds" {
+    // The centered-title pattern: a grow text spanning the header row
+    // has a FRAME under the trailing cluster while its inked glyphs sit
+    // well clear of it. Judging the frame would pay the clearance retry,
+    // and the trimmed content box would visibly shift the centered title
+    // — so the scan measures the aligned painted line instead. A
+    // trailing-aligned grow text whose painted END sits under the
+    // cluster still collides (the system-monitor case), the macOS
+    // leading mirror agrees, and multi-line text keeps the conservative
+    // frame test.
+    const cluster = geometry.RectF.init(262, 0, 138, 32);
+    const bounds = geometry.RectF.init(0, 0, 400, 40);
+
+    var title = Widget{ .id = 2, .kind = .text, .text = "Monitor", .layout = .{ .grow = 1 } };
+    title.text_alignment = .center;
+    const centered_children = [_]Widget{title};
+    var drag_row = Widget{ .id = 1, .kind = .row, .children = &centered_children };
+    drag_row.window_drag = true;
+
+    var nodes: [4]WidgetLayoutNode = undefined;
+    var layout = try canvas.layoutWidgetTreeWithTokens(drag_row, bounds, DesignTokens{}, &nodes);
+    // The grow frame really does span the cluster; the painted glyphs
+    // do not — no trigger, so the runtime never retries and the
+    // centered title never moves.
+    try std.testing.expect(layout.findById(2).?.frame.maxX() > cluster.x);
+    try std.testing.expect(!canvas.windowDragContentUnderWindowControls(layout.nodes, cluster, DesignTokens{}));
+
+    // Trailing-aligned grow text: same frame, painted end under the
+    // cluster — still a collision, and the remedy still converges (the
+    // re-laid text ends at the cluster's leading edge, so the re-scan
+    // of the remedied layout stays quiet).
+    var status = title;
+    status.text_alignment = .end;
+    const trailing_children = [_]Widget{status};
+    var trailing_row = drag_row;
+    trailing_row.children = &trailing_children;
+    layout = try canvas.layoutWidgetTreeWithTokens(trailing_row, bounds, DesignTokens{}, &nodes);
+    try std.testing.expect(canvas.windowDragContentUnderWindowControls(layout.nodes, cluster, DesignTokens{}));
+    const trailing_tokens = DesignTokens{ .window_controls = cluster };
+    layout = try canvas.layoutWidgetTreeWithTokens(trailing_row, bounds, trailing_tokens, &nodes);
+    try std.testing.expect(layout.findById(2).?.frame.maxX() <= cluster.x + 0.01);
+    try std.testing.expect(!canvas.windowDragContentUnderWindowControls(layout.nodes, cluster, trailing_tokens));
+
+    // The macOS mirror: a leading cluster collides with leading-aligned
+    // glyphs but not with the same centered title.
+    const leading_cluster = geometry.RectF.init(0, 0, 78, 32);
+    var lead = title;
+    lead.text_alignment = .start;
+    const lead_children = [_]Widget{lead};
+    var lead_row = drag_row;
+    lead_row.children = &lead_children;
+    layout = try canvas.layoutWidgetTreeWithTokens(lead_row, bounds, DesignTokens{}, &nodes);
+    try std.testing.expect(canvas.windowDragContentUnderWindowControls(layout.nodes, leading_cluster, DesignTokens{}));
+    layout = try canvas.layoutWidgetTreeWithTokens(drag_row, bounds, DesignTokens{}, &nodes);
+    try std.testing.expect(!canvas.windowDragContentUnderWindowControls(layout.nodes, leading_cluster, DesignTokens{}));
+
+    // Multi-line text (an explicit newline) stacks lines with per-line
+    // extents, so the scan keeps the conservative frame test: the same
+    // centered grow leaf triggers once it can break.
+    var wrapped = title;
+    wrapped.text = "Mon\nitor";
+    const wrapped_children = [_]Widget{wrapped};
+    var wrapped_row = drag_row;
+    wrapped_row.children = &wrapped_children;
+    layout = try canvas.layoutWidgetTreeWithTokens(wrapped_row, bounds, DesignTokens{}, &nodes);
+    try std.testing.expect(canvas.windowDragContentUnderWindowControls(layout.nodes, cluster, DesignTokens{}));
+}
+
+test "window-control clearance moves a drag header's anchored children too" {
+    // The collision scan counts every content descendant of the drag
+    // header — anchored floaters included — so the remedy must move
+    // them: a drag header's anchored children resolve against the
+    // cleared anchor rect, not the full frame, or the runtime pays its
+    // one retry and the child stays under the caption buttons. Non-drag
+    // widgets' anchored children never move (menus/popovers anchor
+    // everywhere), stamped tokens or not.
+    const cluster = geometry.RectF.init(262, 0, 138, 32);
+    const bounds = geometry.RectF.init(0, 0, 400, 300);
+    const trailing_tokens = DesignTokens{ .window_controls = cluster };
+
+    // A 24pt-tall header (shorter than the 32pt cluster band) whose ONLY
+    // content is an end-aligned floater dropping just below the header —
+    // still inside the cluster band, and under its buttons.
+    const badge = Widget{ .id = 3, .kind = .text, .text = "recording", .layout = .{ .anchor = .{ .placement = .below, .alignment = .end, .offset = 0 } } };
+    const header_children = [_]Widget{badge};
+    var header = Widget{ .id = 2, .kind = .row, .frame = geometry.RectF.init(0, 0, 0, 24), .children = &header_children };
+    header.window_drag = true;
+    const root_children = [_]Widget{header};
+    const root = Widget{ .id = 1, .kind = .column, .children = &root_children };
+
+    // Unstamped: the floater ends at the header's trailing edge, under
+    // the cluster — and the scan fires on it (anchored-only content is
+    // still a collision).
+    var nodes: [6]WidgetLayoutNode = undefined;
+    var layout = try canvas.layoutWidgetTreeWithTokens(root, bounds, DesignTokens{}, &nodes);
+    const naive = layout.findById(3).?.frame;
+    try std.testing.expect(naive.maxX() > cluster.x);
+    try std.testing.expect(!geometry.RectF.intersection(naive.normalized(), cluster).isEmpty());
+    try std.testing.expect(canvas.windowDragContentUnderWindowControls(layout.nodes, cluster, DesignTokens{}));
+
+    // Stamped: the anchor base is trimmed, the floater lands clear of
+    // the cluster, and re-scanning the remedied layout stays quiet —
+    // scan and remedy agree, so the runtime's single retry converges.
+    layout = try canvas.layoutWidgetTreeWithTokens(root, bounds, trailing_tokens, &nodes);
+    try std.testing.expect(layout.findById(3).?.frame.maxX() <= cluster.x + 0.01);
+    try std.testing.expect(!canvas.windowDragContentUnderWindowControls(layout.nodes, cluster, trailing_tokens));
+
+    // The macOS mirror: a leading cluster pushes a start-aligned floater
+    // past its trailing edge.
+    const leading_cluster = geometry.RectF.init(0, 0, 78, 32);
+    const lead_badge = Widget{ .id = 3, .kind = .text, .text = "recording", .layout = .{ .anchor = .{ .placement = .below, .alignment = .start, .offset = 0 } } };
+    const lead_children = [_]Widget{lead_badge};
+    var lead_header = header;
+    lead_header.children = &lead_children;
+    const lead_root_children = [_]Widget{lead_header};
+    var lead_root = root;
+    lead_root.children = &lead_root_children;
+    layout = try canvas.layoutWidgetTreeWithTokens(lead_root, bounds, DesignTokens{}, &nodes);
+    try std.testing.expect(canvas.windowDragContentUnderWindowControls(layout.nodes, leading_cluster, DesignTokens{}));
+    layout = try canvas.layoutWidgetTreeWithTokens(lead_root, bounds, DesignTokens{ .window_controls = leading_cluster }, &nodes);
+    try std.testing.expect(layout.findById(3).?.frame.x >= leading_cluster.maxX() - 0.01);
+    try std.testing.expect(!canvas.windowDragContentUnderWindowControls(layout.nodes, leading_cluster, DesignTokens{ .window_controls = leading_cluster }));
+
+    // A non-drag row's anchored child is byte-identical with the stamp:
+    // anchoring semantics outside declared titlebars never change.
+    var plain_header = header;
+    plain_header.window_drag = false;
+    const plain_root_children = [_]Widget{plain_header};
+    var plain_root = root;
+    plain_root.children = &plain_root_children;
+    layout = try canvas.layoutWidgetTreeWithTokens(plain_root, bounds, DesignTokens{}, &nodes);
+    const unstamped = layout.findById(3).?.frame;
+    layout = try canvas.layoutWidgetTreeWithTokens(plain_root, bounds, trailing_tokens, &nodes);
+    try std.testing.expectEqual(unstamped, layout.findById(3).?.frame);
 }
 
 test "geometry pixel snapping off keeps label-exact intrinsic widths bit-identical" {
