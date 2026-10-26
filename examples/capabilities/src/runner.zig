@@ -45,9 +45,9 @@ pub const RunOptions = struct {
             .description = manifestStringField("description"),
             .has_web_content = manifestHasWebContent(),
             .webview_inspection = if (@hasDecl(build_options, "webview_inspection"))
-                build_options.webview_inspection orelse (@import("builtin").mode == .Debug)
+                build_options.webview_inspection orelse (@import("builtin").mode == .debug)
             else
-                @import("builtin").mode == .Debug,
+                @import("builtin").mode == .debug,
             .window_title = self.window_title,
             .bundle_id = self.bundle_id,
             .icon_path = self.icon_path,

@@ -546,9 +546,9 @@ test "markup engine parity: the keypad builds identical trees" {
         var interpreted_ui = Ui.init(arena);
         const interpreted = try interpreted_ui.finalize(try interpreter.build(&interpreted_ui, &model));
 
-        var compiled_ids: std.ArrayListUnmanaged(canvas.ObjectId) = .empty;
+        var compiled_ids: std.array_list.Aligned(canvas.ObjectId, null) = .empty;
         defer compiled_ids.deinit(testing.allocator);
-        var interpreted_ids: std.ArrayListUnmanaged(canvas.ObjectId) = .empty;
+        var interpreted_ids: std.array_list.Aligned(canvas.ObjectId, null) = .empty;
         defer interpreted_ids.deinit(testing.allocator);
         try collectIds(compiled.root, &compiled_ids, testing.allocator);
         try collectIds(interpreted.root, &interpreted_ids, testing.allocator);
@@ -557,7 +557,7 @@ test "markup engine parity: the keypad builds identical trees" {
     }
 }
 
-fn collectIds(widget: canvas.Widget, ids: *std.ArrayListUnmanaged(canvas.ObjectId), allocator: std.mem.Allocator) !void {
+fn collectIds(widget: canvas.Widget, ids: *std.array_list.Aligned(canvas.ObjectId, null), allocator: std.mem.Allocator) !void {
     try ids.append(allocator, widget.id);
     for (widget.children) |child| try collectIds(child, ids, allocator);
 }
